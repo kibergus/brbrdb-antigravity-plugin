@@ -1,6 +1,6 @@
 # BRBR Telemetry Companion Plugin for Antigravity
 
-This plugin connects Antigravity to the [brbrdb.brbrkitten.com](https://brbrdb.brbrkitten.com) Telemetry Viewer. It enables interactive racing telemetry analysis where the AI assistant highlights key driving moments (braking points, apex scrubbing, throttle application) with in-text clickable buttons that jump and zoom the Telemetry Viewer in the side panel in real time without reloading the page.
+This plugin connects Antigravity to the [BrBrDb](https://brbrdb.brbrkitten.com) Telemetry Viewer. It enables interactive racing telemetry analysis within the AI assistant.
 
 ---
 
@@ -16,22 +16,26 @@ You will likely want a dedicated workspace on your computer for your driving tel
 
 ### Step 3: Install the Plugin
 
-You can point the agent to this page and ask it to do all the technical installation steps.
+The easiest way to install the plugin is to ask Antigravity to do that:
 
-Inside your racing workspace, clone the plugin repository into `.agents/plugins/brbrtelemetry`:
-
-```bash
-mkdir -p .agents/plugins
-git clone https://github.com/kibergus/brbrdb-antigravity-plugin.git .agents/plugins/brbrtelemetry
+```text
+Install the BRBR Telemetry companion plugin globally by following the installation instructions in its README.md: clone https://github.com/kibergus/brbrdb-antigravity-plugin.git into ~/.gemini/config/plugins/brbrtelemetry and configure the MCP tools in ~/.gemini/config/mcp_config.json (ask me for my BrBrDb authentication key).
 ```
 
-Antigravity will automatically detect the plugin in `.agents/plugins/brbrtelemetry` and activate it for your workspace.
+Alternatively, to install it manually, clone the plugin repository into `~/.gemini/config/plugins/brbrtelemetry`:
+
+```bash
+mkdir -p ~/.gemini/config/plugins
+git clone https://github.com/kibergus/brbrdb-antigravity-plugin.git ~/.gemini/config/plugins/brbrtelemetry
+```
+
+Antigravity will automatically detect the plugin in `~/.gemini/config/plugins/brbrtelemetry` and activate it globally across all your workspaces.
 
 ---
 
 ## 2. Configuring MCP Tools for BrBrDb (Required)
 
-The AI assistant needs the BrBrDb MCP tools (`list_sessions`, `get_track_info`, `get_stats`, `get_telemetry_plot`, etc.) to query and inspect telemetry data. Create or edit `.gemini/mcp_config.json` in your workspace (or globally at `~/.gemini/config/mcp_config.json`):
+The AI assistant needs the BrBrDb MCP tools (`list_sessions`, `get_track_info`, `get_stats`, `get_telemetry_plot`, etc.) to query and inspect telemetry data. Create or edit `~/.gemini/config/mcp_config.json` (or `.gemini/mcp_config.json` in your workspace):
 
 ```json
 {
