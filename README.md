@@ -1,6 +1,6 @@
 # BRBR Telemetry Companion Plugin for Antigravity
 
-This plugin connects Antigravity to the [brbrdb.brbrkitten.com](https://brbrdb.brbrkitten.com) Telemetry Viewer. It enables interactive racing telemetry analysis where the AI assistant highlights key driving moments (braking points, apex scrubbing, throttle application) with in-text clickable buttons that jump and zoom the Telemetry Viewer in the side panel in real time without reloading the page.
+This plugin connects Antigravity to the [BrBrDb](https://brbrdb.brbrkitten.com) Telemetry Viewer. It enables interactive racing telemetry analysis within the AI assistant.
 
 ---
 
@@ -14,51 +14,74 @@ Download and install [Antigravity](https://antigravity.google) for your operatin
 
 You will likely want a dedicated workspace on your computer for your driving telemetry, session notes, and coaching conversations (e.g., `racing` or `telemetry`). Workspaces are basically directories.
 
-### Step 3: Install the Plugin
 
-You can point the agent to this page and ask it to do all the technical installation steps.
+## Quick Installation (Copy-Paste Prompt for Vanilla Antigravity)
 
-Inside your racing workspace, clone the plugin repository into `.agents/plugins/brbrtelemetry`:
+The easiest way to install the plugin is to ask Antigravity to do that:
 
-```bash
-mkdir -p .agents/plugins
-git clone https://github.com/kibergus/brbrdb-antigravity-plugin.git .agents/plugins/brbrtelemetry
+```text
+Install the BRBR Telemetry plugin globally by following the installation instructions in its README.md: clone https://github.com/kibergus/brbrdb-antigravity-plugin.git into ~/.gemini/config/plugins/brbrtelemetry and configure the MCP tools in ~/.gemini/config/mcp_config.json (ask me for my BrBrDb authentication key).
 ```
-
-Antigravity will automatically detect the plugin in `.agents/plugins/brbrtelemetry` and activate it for your workspace.
 
 ---
 
-## 2. Configuring MCP Tools for BrBrDb (Required)
+## Extended installation runbook (for agents or very curious minds)
 
-The AI assistant needs the BrBrDb MCP tools (`list_sessions`, `get_track_info`, `get_stats`, `get_telemetry_plot`, etc.) to query and inspect telemetry data. Create or edit `.gemini/mcp_config.json` in your workspace (or globally at `~/.gemini/config/mcp_config.json`):
+### Step 1: Clone the Plugin into `~/.gemini/config/plugins/brbrtelemetry`
+Antigravity discovers both skills and UI sidecars globally from `~/.gemini/config/plugins/` (on Windows: `%USERPROFILE%\.gemini\config\plugins\`). The sidecar (`sidecars/telemetry-viewer/server.mjs`) is completely zero-dependency, using only Node.js built-in standard library modules.
+
+Clone the repository directly there:
+
+```bash
+git clone https://github.com/kibergus/brbrdb-antigravity-plugin.git ~/.gemini/config/plugins/brbrtelemetry
+```
+
+*(If the directory already exists, run `git -C ~/.gemini/config/plugins/brbrtelemetry pull --ff-only` to update it.)*
+
+### Step 2: Configure the `telemetry` MCP Server
+Add the `telemetry` server to `~/.gemini/config/mcp_config.json` using your BrBrDb authentication key (if you are an AI agent running this setup, ask the user for their key first):
 
 ```json
 {
   "mcpServers": {
-    "brbrdb": {
-      "url": "https://brbrdb.brbrkitten.com/api/mcp?key=YOUR_API_KEY"
+    "telemetry": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://brbrdb.brbrkitten.com/api/mcp?key=<API_KEY>"
+      ]
     }
   }
 }
 ```
 
+### Step 3: Open the Telemetry Viewer Panel
+Antigravity automatically detects and starts the sidecar within a few seconds of installation (or after restarting Antigravity). If an AI agent is performing the installation, it can read `~/.gemini/config/plugins/brbrtelemetry/skills/telemetry_analysis/SKILL.md` and output the panel shortcut in chat:
+
+```markdown
+[Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)
+```
+
 ---
 
-## 3. Telemetry Viewer Authentication
+## 2. Telemetry Viewer Authentication
 
 The Telemetry Viewer sidecar runs in Antigravity's auxiliary side panel. When the sidecar panel opens, if you are not yet authenticated, simply enter your access key in the login form inside the side panel. Your session cookie is saved in the embedded webview.
 
-## 4. How to Use
+## 3. How to Use
 
 1. **Open the Telemetry Viewer Panel:**
-   Click the sidecar link in chat or ask the assistant:
-   `Open Telemetry Viewer`
-   The Telemetry Viewer opens in Antigravity's auxiliary side panel on the right.
+   Click the **[Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)** pill in chat, or select **Telemetry Viewer** from the Auxiliary Side Pane on the right.
 
 2. **Ask Questions:**
    Ask any telemetry or driving technique question, for example:
-   > *"Compare my laps 2 and 3 in Turn 3 at Whilton Mill and highlight the braking differences."*
+   > *"Compare the fastest lap by Katia and by the Coach in the Whilton Mill 18:43 practice session."*
 
 3. **Interact with the Telemetry:**
-   Click any of the highlighted distance pills (e.g. `316.5m`, `Apex`, `Throttle`) inside the AI's commentary. The side panel viewer will instantly zoom and align to that exact track position and telemetry trace.
+   Click any of the highlighted distance pills (e.g. `668.7m`, `Apex`, `Braking`) inside the AI's commentary. The side panel viewer will immediately jump and zoom to that exact track section and telemetry channel trace.
+
+4. **Saving Reports (Optional):**
+   Conversational analysis and interactive triggers work entirely within Antigravity. If you want to publish a report to the website, ask:
+   > *"Save this report to the site."*
+   *(Requires server `manage_reports` permission)*.

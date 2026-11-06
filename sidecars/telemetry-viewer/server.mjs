@@ -17,6 +17,8 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import crypto from 'node:crypto';
 
 const DEFAULT_PORT = 38472;
@@ -24,7 +26,7 @@ const UI_PORT = parseInt(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT || DEFAULT_POR
 const WS_PORT = DEFAULT_PORT;
 const API_KEY = process.env.BRBRDB_API_KEY || '';
 const TARGET_HOST = process.env.BRBRDB_HOST || 'brbrdb.brbrkitten.com';
-const LOG_FILE = '/tmp/telemetry_companion.log';
+const LOG_FILE = path.join(os.tmpdir(), 'telemetry_companion.log');
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -202,7 +204,8 @@ function createHttpHandler() {
       return;
     }
 
-    // Default route serves a seamless wrapper pointing directly to the HTTPS host via /auth
+    // Default route serves a seamless wrapper pointing directly to the HTTPS host via /auth,
+    // establishing the partitioned cookie and preserving the production referrer for Google Maps.
     const rawPath = parsedUrl.searchParams.get('url') || parsedUrl.searchParams.get('next') || currentTelemetryPath;
     const telemetryPath = ensureCompanionParams(rawPath);
     const authTarget = API_KEY

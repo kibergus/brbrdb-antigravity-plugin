@@ -29,7 +29,7 @@ This skill provides an autonomous, turn-by-turn workflow for analyzing karting a
 
 ---
 
-## 1. Opening the Telemetry Viewer Sidecar
+## 1. Opening the Telemetry Viewer Sidecar & Selecting Laps
 
 When an analysis session is initiated or referenced, emit a markdown pill to open and focus the sidecar view in the auxiliary side panel:
 
@@ -39,15 +39,44 @@ When an analysis session is initiated or referenced, emit a markdown pill to ope
 
 The sidecar runs a local HTTP/WebSocket event bridge on port `38472` connecting the Antigravity chat to the Telemetry Viewer in real time without page reloads.
 
+### Fast-Path: Opening a Session & Selecting Laps (2 Steps)
+When the user asks to open a session URL or show/compare specific laps (e.g. fastest lap by two drivers) without requesting a deep corner-by-corner coaching breakdown, follow this **2-step fast path** and **STOP** (do NOT run per-turn `get_stats`, `get_telemetry_plot`, or inspect local/remote HTML/JS files):
+
+1. **Find the lap numbers and session IDs**: Call `get_pace_summary(track, date, session_id)` (or `get_stats(track, date, session_id)`).
+2. **Construct Lap IDs (`lapsA`) and dispatch to `/api/action`**:
+   - **Lap ID Format**: Strip `.csv` from the lap's `session_id` (or `actual_best_session`) and append `-{lap_number}`.
+     - Single-driver session example: `20_06_practice-28`
+     - Multi-driver session example: `18_43_practice_kartsim_coach_rs-25` and `18_43_practice_katia_guseinova-36`
+   - **Update the sidecar session URL & active laps** in one POST request to `http://127.0.0.1:38472/api/action`:
+     ```bash
+     curl -s -X POST http://127.0.0.1:38472/api/action \
+       -H "Content-Type: application/json" \
+       -d '{
+         "type": "telemetry_jump",
+         "lapsA": ["18_43_practice_kartsim_coach_rs-25", "18_43_practice_katia_guseinova-36"],
+         "url": "/telemetry/kartsim/iame_waterswift_restricted_cadet_uk/2026-11-05/Whilton%20Mill?session_id=18_43_practice&lapsA=18_43_practice_kartsim_coach_rs-25%2C18_43_practice_katia_guseinova-36&tab=map"
+       }'
+     ```
+   - Reply immediately with `[Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)` and a concise summary table.
+
 ---
 
 ## 2. Interactive In-Text Pill Commentary
 
-Always format key telemetry evidence (braking points, apex scrub marks, throttle pickups) as clickable inline pills within your conversational text.
+Always format key telemetry evidence (braking points, apex scrub marks, throttle pickups) as clickable inline pills within your conversational text using Antigravity's **Generative UI (`<agent-embed>`)** system.
 
-### Generative UI Template
+> [!IMPORTANT]
+> **NEVER output ` ```html ... ``` ` code blocks directly in your chat message!** Fenced HTML blocks in chat are rendered as literal syntax-highlighted source code, NOT interactive buttons.
+>
+> You **MUST** follow this exact two-step workflow every time you render interactive telemetry pills:
+> 1. **Write the HTML file to the Artifact Directory**: Use `write_file` to save a self-contained `.html` file at `<appDataDir>/brain/<conversation-id>/<widget-name>.html` with `Overwrite: true` and `ArtifactMetadata: { "Summary": "Interactive telemetry pills", "UserFacing": true, "RequestFeedback": false }`.
+> 2. **Embed Inline with `<agent-embed>`**: In your chat response, place the `<agent-embed>` tag on its own line (outside any code fences or backticks):
+>
+> `<agent-embed src="file:///absolute/path/to/brain/<conversation-id>/<widget-name>.html"></agent-embed>`
 
-Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
+### Step-by-Step Generative UI Template
+
+**Step A — Save to `<appDataDir>/brain/<conversation-id>/turn_commentary.html` via `write_file`:**
 
 ```html
 <!DOCTYPE html>
@@ -85,6 +114,7 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'telemetry_jump',
+            tab: 'map',
             dist: dist,
             plots: plots,
             xlim: xlim
@@ -101,12 +131,19 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
 </html>
 ```
 
+**Step B — Output the raw `<agent-embed>` tag in your chat response (no backticks):**
+
+```markdown
+<agent-embed src="file:///home/user/.gemini/antigravity/brain/<conversation-id>/turn_commentary.html"></agent-embed>
+```
+
 ### Supported Action Properties dispatched to `/api/action`:
+- `url` (string): Relative path + query string (e.g. `"/telemetry/kartsim/.../Whilton%20Mill?session_id=18_43_practice&lapsA=...&tab=map"`) to load or switch the active session in the sidecar viewer.
+- `laps` / `lapsA` (array of lap IDs): Active comparison laps formatted as `<session_id_without_csv>-<lap_number>` (e.g. `["18_43_practice_kartsim_coach_rs-25", "18_43_practice_katia_guseinova-36"]`).
 - `dist` (number): Distance in meters along track to position cursor and kart marker.
 - `xlim` / `plotRange` (array `[min, max]`): Visible X-axis meter range on bottom charts.
 - `mapRange` (array `[min, max]`): Centers satellite map over track segment.
 - `plots` (array of strings): Visible bottom channel plots, e.g. `['speed', 'pedals']` or `['speed', 'steering']`.
-- `laps` / `lapsA` (array of lap IDs): Active comparison laps.
 
 ---
 
@@ -115,7 +152,7 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
 ### Step 1: Session & Data Discovery (Orchestrator)
 1. **MCP Data Loading**:
    - All session lists, track metadata, pace summaries, lap statistics, and telemetry plots are loaded via MCP server tools (`list_sessions`, `get_track_info`, `get_pace_summary`, `get_stats`, `get_telemetry_plot`, `get_trajectory_plot`).
-   - Do NOT search the local workspace or filesystem for telemetry logs, CSVs, or databases.
+   - Do NOT search the local workspace or filesystem for telemetry logs, CSVs, or databases, and do NOT grep HTML files or curl frontend JS to inspect URL/lap formats.
 2. **Channel Audit**:
    - Identify physically recorded channels (`Speed`, `accel`, `Latitude`/`Longitude` vs full sensor suites with `Steering Angle`, `Throttle`, `Brake`).
    - Ground conclusions in available data. If a channel is absent, never present inferences as measured facts.

@@ -1,8 +1,12 @@
 {
   "mcpServers": {
-    "brbrdb": {
-      "url": "https://brbrdb.brbrkitten.com/api/mcp?key=YOUR_BRBRDB_API_KEY"
+    "telemetry": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://brbrdb.brbrkitten.com/api/mcp?key=YOUR_BRBRDB_API_KEY"
+      ]
     }
   }
 }
-
