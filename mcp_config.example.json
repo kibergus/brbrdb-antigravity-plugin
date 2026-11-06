@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "brbrdb": {
+      "url": "https://brbrdb.brbrkitten.com/api/mcp?key=YOUR_BRBRDB_API_KEY"
+    }
+  }
+}
+
