@@ -5,7 +5,9 @@ description: Analyzes karting telemetry data using MCP server tools and corner s
 
 # Telemetry Analysis & Companion Skill
 
-This skill provides an autonomous, turn-by-turn workflow for analyzing karting and racing telemetry data inside Google Antigravity. It pairs conversational chat commentary on the left with the interactive **Telemetry Viewer** in Antigravity's auxiliary side panel on the right.
+This skill provides an autonomous, turn-by-turn workflow for analyzing karting and racing telemetry data inside Google Antigravity. It pairs conversational chat commentary on the left with the interactive **Telemetry Viewer** in Antigravity's auxiliary side panel on the right, backed by two MCP servers:
+- **`brbrdb` MCP server**: Session discovery, track geometry, lap statistics, inspection plots, and raw numeric telemetry (`get_telemetry_data`, including high-rate `raw_aux_stream` auxiliary streams).
+- **`companion` MCP server** (bundled locally with the plugin on `127.0.0.1:38472`): Live Telemetry Viewer control (`set_telemetry_view`), workspace study discovery (`list_workspace_studies`), dynamic plot group registration (`register_plot_group`), live reload (`sync_workspace_data`), and connection status (`get_telemetry_view_status`).
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -14,36 +16,155 @@ This skill provides an autonomous, turn-by-turn workflow for analyzing karting a
 | | Left: Agent Chat & Interactive Commentary     | | Right: Telemetry Viewer     | |
 | |                                               | | (Auxiliary Sidecar Panel)   | |
 | | Driver: "Why was Turn 3 slower on Lap 5?"     | |                             | |
-| |                                               | | [Map & GPS Trajectory]      | |
+| |                                               | | [Map & GPS Overlays]        | |
 | | Coach: On Benchmark Lap 6, braking was at     | |  - Live kart position       | |
-| |   [316.5m (Braking Point)]                    | |  - Trajectory comparisons   | |
+| |   [316.5m (Braking Point)]                    | |  - Vector & heatmap layers  | |
 | | but on Lap 5 you braked late at               | |                             | |
 | |   [319.5m] and scrubbed speed at              | | [Synchronized Plots]        | |
-| |   [338.0m (Apex)]                             | |  - Speed (km/h)             | |
-| |                                               | |  - Delta T (s)              | |
-| | (Clicking pills immediately synchronizes the  | |  - Throttle & Steering      | |
-| |  Telemetry Viewer in the right side panel)    | |                             | |
+| |   [338.0m (Apex)]                             | |  - Speed, Delta T, Pedals   | |
+| |                                               | |  - Custom tabs (e.g. EEG)   | |
 | +-----------------------------------------------+ +-----------------------------+ |
 +-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 1. Opening the Telemetry Viewer Sidecar
+## 1. Opening & Driving the Telemetry Viewer Sidecar
 
-When an analysis session is initiated or referenced, emit a markdown pill to open and focus the sidecar view in the auxiliary side panel:
-
-```markdown
-[Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)
-```
-
-The sidecar runs a local HTTP/WebSocket event bridge on port `38472` connecting the Antigravity chat to the Telemetry Viewer in real time without page reloads.
+When an analysis session is initiated or referenced:
+1. Emit a markdown pill so the user can open or focus the sidecar view in the auxiliary side panel:
+   ```markdown
+   [Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)
+   ```
+2. Drive the viewer directly using the **`companion` MCP tool `set_telemetry_view(...)`** whenever introducing a session, comparing laps, focusing a corner, or toggling custom plots and overlays:
+   - `session_url`: Navigate to a session URL when changing sessions (zero-reload when already on the target session).
+   - `laps_a` / `laps_b`: Set active comparison laps (e.g. `laps_a=["14", "18"]`).
+   - `turn`: 1-indexed turn number to focus (`turn=3` focuses Turn 3), or `xlim=[290, 380]` / `map_range=[290, 380]` / `dist=316.5`.
+   - `plots`: Visible bottom plots, including built-in (`"speed"`, `"delta"`, `"pedals"`, `"steering"`, `"gforce"`) and custom study groups (`"eeg"`).
+   - `study`: Active study subfolder under `<workspace>/studies/` (e.g. `"2026-04-12_buckmore_eeg"`).
+   - `overlays`: Explicit list of GeoJSON overlay IDs to display on the map (e.g. `["braking_zones", "apex_theta_heatmap"]`), or `[]` to clear all overlays.
 
 ---
 
-## 2. Interactive In-Text Pill Commentary
+## 2. Workspace Studies Organization (`<workspace>/studies/`)
 
-Always format key telemetry evidence (braking points, apex scrub marks, throttle pickups) as clickable inline pills within your conversational text.
+When generating local overlays, custom telemetry channels, or analysis scripts in the user's workspace, keep the workspace organized so data from past sessions can be revisited and compared cleanly:
+
+```text
+<workspace>/
+└── studies/
+    ├── 2026-04-12_buckmore_turn3_braking/
+    │   ├── README.md
+    │   ├── overlays/
+    │   │   └── braking_zones.geojson
+    │   ├── channels/
+    │   │   └── trail_brake_efficiency.json
+    │   ├── plot_groups.json
+    │   └── scripts/
+    │       └── compute_braking.py
+    └── 2026-04-12_buckmore_eeg_focus/
+        ├── overlays/
+        │   └── theta_heatmap.geojson
+        ├── channels/
+        │   └── eeg_alpha_theta.json
+        └── plot_groups.json
+```
+
+### Multi-Study Rules
+1. **Check Existing Studies First**: Call `list_workspace_studies()` before creating new folders so you can reuse or cross-compare prior studies on the same track or driver instead of duplicating files.
+2. **Naming Convention**: Name each study folder `<YYYY-MM-DD>_<track>_<topic>/` under `<workspace>/studies/`.
+3. **Scoped Loading & Explicit Overlay Selection**:
+   - Activating `study="<study_id>"` scopes custom channels and plot tabs to that study, unmounting tabs from unrelated studies.
+   - **Never auto-dump every GeoJSON file onto the map**: explicitly pass `overlays=[...]` in `set_telemetry_view` (or interactive pills) for the specific layers relevant to the current insight, and pass `overlays=[]` to clear them. Cross-study overlays can be referenced as `"<other_study>/overlays/<file>"`.
+
+---
+
+## 3. Recipes for Map Overlays & Custom Channels (EEG, Signal Processing)
+
+### Recipe A: GeoJSON Vector & Heatmap Map Overlays
+Write standard WGS84 (`[longitude, latitude]`) GeoJSON `FeatureCollection` files into `<workspace>/studies/<study_id>/overlays/<name>.geojson`:
+- **Vector overlay (`metadata.render = "vector"`)**: Supports `Point`, `LineString`, `Polygon`, per-feature style overrides (`strokeColor`, `strokeWeight`, `fillColor`, `fillOpacity`, `radius`, `label`, `tooltip`), or scalar colormaps (`value_property`, `colormap` in `"turbo" | "inferno" | "viridis" | "rdylgn" | "coolwarm"`, `domain`, `unit`).
+- **Heatmap overlay (`metadata.render = "heatmap"`)**: Renders smooth Gaussian spatial heatmaps (`radius_m`, `opacity`, `value_property`, `colormap`, `domain`, `unit`) for continuous spatial metrics such as tyre scrub intensity or EEG cognitive load around the circuit.
+
+After writing or updating an overlay file, call:
+```python
+set_telemetry_view(
+    study="2026-04-12_buckmore_eeg_focus",
+    overlays=["theta_heatmap"],
+    map_range=[280, 410],
+)
+```
+
+### Recipe B: Custom Channels & Multi-Channel Plot Groups (e.g. Raw 500 Hz EEG -> Alpha & Theta)
+1. **Fetch High-Rate Auxiliary Samples**:
+   When a session lists an auxiliary stream (e.g. `spikerbit` at ~500 Hz), call `get_telemetry_data(..., raw_aux_stream="spikerbit")`. Each sample includes native `timestamp` alongside `Lap` and `Lap Distance` interpolated from the primary GPS stream.
+2. **Compute Band Power / Custom Metrics in Python**:
+   Run a script in `<workspace>/studies/<study_id>/scripts/` (e.g. Welch PSD / bandpass + Hilbert envelope over sliding windows for **EEG Alpha (`8–13 Hz`)** and **EEG Theta (`4–8 Hz`)**) and write `<workspace>/studies/<study_id>/channels/eeg_alpha_theta.json`:
+   ```json
+   {
+     "channels": [
+       {
+         "schema": "brbr.custom_channel.v1",
+         "channel_id": "eeg_alpha",
+         "label": "Alpha (8-13 Hz)",
+         "unit": "uV^2",
+         "color": "#a855f7",
+         "group": "eeg",
+         "group_label": "EEG",
+         "series": [
+           {
+             "session_id": "20260412_104512_kibergus",
+             "lap_num": 14,
+             "align": "distance",
+             "x": [0.0, 2.0, 4.0],
+             "y": [14.2, 13.8, 12.1]
+           }
+         ]
+       },
+       {
+         "schema": "brbr.custom_channel.v1",
+         "channel_id": "eeg_theta",
+         "label": "Theta (4-8 Hz)",
+         "unit": "uV^2",
+         "color": "#06b6d4",
+         "group": "eeg",
+         "group_label": "EEG",
+         "series": [
+           {
+             "session_id": "20260412_104512_kibergus",
+             "lap_num": 14,
+             "align": "distance",
+             "x": [0.0, 2.0, 4.0],
+             "y": [9.4, 11.2, 15.6]
+           }
+         ]
+       }
+     ]
+   }
+   ```
+   *(Series support `"align": "distance"` where `x` is track meters per lap, or `"align": "time"` where `x` is session elapsed seconds.)*
+3. **Register & Open the Plot Tab**:
+   Call `register_plot_group` on the `companion` MCP server to mount the `EEG` tab next to `Pedals` / `Steering` and open it immediately:
+   ```python
+   register_plot_group(
+       study="2026-04-12_buckmore_eeg_focus",
+       id="eeg",
+       label="EEG",
+       channels=[
+           {"channel_id": "eeg_alpha", "label": "Alpha (8-13 Hz)", "color": "#a855f7"},
+           {"channel_id": "eeg_theta", "label": "Theta (4-8 Hz)", "color": "#06b6d4"},
+       ],
+       y_label="Band Power (uV^2)",
+       color_mode="channel",
+       open_plot=True,
+   )
+   ```
+
+---
+
+## 4. Interactive In-Text Pill Commentary
+
+Always format key telemetry evidence (braking points, apex scrub marks, throttle pickups, overlay highlights) as clickable inline pills within your conversational text.
 
 ### Generative UI Template
 
@@ -59,16 +180,16 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
 <body class="bg-transparent text-[var(--foreground)] antialiased m-0 p-0 font-sans">
   <div class="space-y-2">
     <p class="text-sm leading-relaxed text-[var(--foreground)] m-0">
-      On Benchmark Lap 6, braking begins smoothly at 
-      <button onclick="trigger(316.5, ['speed', 'pedals'], [290, 380])" 
+      On Benchmark Lap 6, braking begins smoothly at
+      <button onclick="trigger({ dist: 316.5, plots: ['speed', 'pedals'], xlim: [290, 380], overlays: ['braking_zones'] })"
         class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-sky-500/15 text-sky-400 font-mono text-xs font-medium border border-sky-500/30 hover:bg-sky-500/25 active:scale-95 transition-all cursor-pointer">
         316.5m
-      </button>, settling the kart. On Lap 5, the driver braked late at 
-      <button onclick="trigger(319.5, ['speed', 'pedals'], [290, 380])" 
+      </button>, settling the kart. On Lap 5, the driver braked late at
+      <button onclick="trigger({ dist: 319.5, plots: ['speed', 'eeg'], xlim: [290, 380], overlays: ['theta_heatmap'] })"
         class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-rose-500/15 text-rose-400 font-mono text-xs font-medium border border-rose-500/30 hover:bg-rose-500/25 active:scale-95 transition-all cursor-pointer">
         319.5m
-      </button> and had to scrub 70° of steering at 
-      <button onclick="trigger(338.0, ['speed', 'steering'], [315, 365])" 
+      </button> as frontal Theta power spiked before apex at
+      <button onclick="trigger({ dist: 338.0, plots: ['speed', 'steering'], xlim: [315, 365] })"
         class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-amber-500/15 text-amber-400 font-mono text-xs font-medium border border-amber-500/30 hover:bg-amber-500/25 active:scale-95 transition-all cursor-pointer">
         338.0m (Apex)
       </button>.
@@ -77,20 +198,15 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
   </div>
 
   <script>
-    async function trigger(dist, plots, xlim) {
+    async function trigger(opts) {
       const ack = document.getElementById('pill-ack');
       try {
         await fetch('http://127.0.0.1:38472/api/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'telemetry_jump',
-            dist: dist,
-            plots: plots,
-            xlim: xlim
-          })
+          body: JSON.stringify(Object.assign({ type: 'telemetry_jump' }, opts))
         });
-        ack.textContent = '✓ ' + dist + 'm';
+        ack.textContent = '✓ ' + (opts.dist !== undefined ? opts.dist + 'm' : 'Synced');
         setTimeout(() => { ack.textContent = ''; }, 2000);
       } catch (e) {
         ack.textContent = '✗ Error';
@@ -104,27 +220,31 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
 ### Supported Action Properties dispatched to `/api/action`:
 - `dist` (number): Distance in meters along track to position cursor and kart marker.
 - `xlim` / `plotRange` (array `[min, max]`): Visible X-axis meter range on bottom charts.
-- `mapRange` (array `[min, max]`): Centers satellite map over track segment.
-- `plots` (array of strings): Visible bottom channel plots, e.g. `['speed', 'pedals']` or `['speed', 'steering']`.
-- `laps` / `lapsA` (array of lap IDs): Active comparison laps.
+- `mapRange` / `focusRange` (array `[min, max]`): Centers satellite map over track segment (`focusRange` sets both `xlim` and `mapRange`).
+- `turnNumber` (1-indexed integer) or `turn` (0-indexed integer): Focuses a numbered corner.
+- `plots` (array of strings): Visible bottom channel plots, including custom group IDs (e.g. `['speed', 'eeg']`).
+- `openPlot` / `togglePlot` (string): Idempotently open or toggle a single plot tab.
+- `laps` / `lapsA` / `lapsB` (array of lap IDs): Active comparison laps.
+- `study` (string): Active workspace study ID.
+- `overlays` (array of strings) / `toggleOverlay` (string): Active GeoJSON map overlays (`[]` clears all).
+- `tcol` (`"pedals" | "delta_t" | "speed" | "accel" | "lap"`) & `mapType` (`"satellite" | "solid_dark"`).
 
 ---
 
-## 3. Telemetry Analysis Methodology
+## 5. Telemetry Analysis Methodology
 
 ### Step 1: Session & Data Discovery (Orchestrator)
 1. **MCP Data Loading**:
-   - All session lists, track metadata, pace summaries, lap statistics, and telemetry plots are loaded via MCP server tools (`list_sessions`, `get_track_info`, `get_pace_summary`, `get_stats`, `get_telemetry_plot`, `get_trajectory_plot`).
-   - Do NOT search the local workspace or filesystem for telemetry logs, CSVs, or databases.
+   - Load session lists, track metadata, pace summaries, lap statistics, inspection plots, and raw numeric arrays via `brbrdb` MCP tools (`list_sessions`, `get_track_info`, `get_pace_summary`, `get_stats`, `get_telemetry_plot`, `get_trajectory_plot`, `get_telemetry_data`).
+   - Check `list_workspace_studies()` on `companion` MCP to discover existing workspace studies, overlays, and custom channels. Do NOT search outside `<workspace>/studies/` for raw server logs or databases.
 2. **Channel Audit**:
-   - Identify physically recorded channels (`Speed`, `accel`, `Latitude`/`Longitude` vs full sensor suites with `Steering Angle`, `Throttle`, `Brake`).
+   - Identify physically recorded primary channels (`Speed`, `accel`, `Latitude`/`Longitude` vs `Steering Angle`, `Throttle`, `Brake`) as well as any recorded auxiliary streams (`aux_streams` such as `spikerbit`).
    - Ground conclusions in available data. If a channel is absent, never present inferences as measured facts.
 3. **Corner Benchmark Rule**:
    - When analyzing a corner (e.g. Turn 3), the benchmark reference lap **MUST be selected based on the fastest segment time for THAT SPECIFIC CORNER** (`turn_time_s` from `get_stats(..., turn_index=N)`), **NOT overall full lap time**.
 4. **Readability Constraints**:
    - **Keep compared laps under 3** (typically 2 laps: 1 Benchmark Reference Lap vs 1 Target Comparison Lap).
-   - **Keep simultaneously opened bottom plots under 3** (e.g. Speed + Pedals, or Speed + Steering). Opening 3+ bottom plots pushes the track map off-screen.
-   - **All compared laps belong in Group A (`lapsA`)**. Group B is not used.
+   - **Keep simultaneously opened bottom plots under 3** (e.g. `Speed` + `Pedals`, or `Speed` + `EEG`). Opening 3+ bottom plots pushes the track map off-screen.
 
 ### Step 2: Corner-by-Corner Investigation via Sub-Agents
 When analyzing a specific corner:
@@ -133,7 +253,7 @@ When analyzing a specific corner:
 3. **Delta T Inflection Analysis**:
    - Pinpoint where the time delta starts to climb on the `Delta Time` trace (entry, apex, or exit).
 4. **Data-Grounded Causation Chains with Calibrated Confidence**:
-   - **Direct Evidence (High Confidence)**: Directly measured channels (Speed, Delta T, GPS line width).
+   - **Direct Evidence (High Confidence)**: Directly measured channels (Speed, Delta T, GPS line width, measured EEG/sensor traces).
    - **Inferred (Medium Confidence)**: Surrogate channels (e.g., assessing drive out of corner via longitudinal `accel` when throttle sensor is absent).
    - **Hypothesis (Low-to-Medium Confidence)**: Unmeasured driver actions (e.g., guessing steering snap when steering sensor is absent). Must be explicitly stated as a hypothesis.
 5. **Junior Driver Coaching Tone**:
@@ -141,10 +261,10 @@ When analyzing a specific corner:
 
 ---
 
-## 4. Report Saving Policy & Graceful Permission Handling
+## 6. Report Saving Policy & Graceful Permission Handling
 
 ### Default Behavior: Interactive Chat Delivery
-By default, the agent delivers all insights, turn comparisons, and interactive pill triggers directly in the Antigravity chat.
+By default, the agent delivers all insights, turn comparisons, workspace overlays/channels, and interactive pill triggers directly in the Antigravity chat and local `<workspace>/studies/` folder.
 - **Do NOT automatically call `save_report` at the end of an analysis.**
 
 ### Explicit User Request Only
@@ -155,5 +275,4 @@ Not all users or API tokens have permission to publish reports on the server (`m
 - If `save_report` fails with a `PermissionError` (e.g. *"Permission denied: current user does not have permission to manage reports..."*):
   1. Do **NOT** fail or halt the analysis.
   2. Inform the user clearly that remote report publishing requires higher credentials/permissions on the server.
-  3. Reassure the user that all findings, analysis commentary, and interactive telemetry controls remain **100% available and functional right here within the Antigravity workspace and companion side panel**.
-
+  3. Reassure the user that all findings, local study artifacts, and interactive telemetry controls remain **100% available and functional right here within the Antigravity workspace and companion side panel**.

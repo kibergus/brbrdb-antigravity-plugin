@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "companion": {
+      "command": "bash",
+      "args": ["${PLUGIN_ROOT}/sidecars/telemetry-viewer/mcp.sh"]
+    }
+  }
+}
+

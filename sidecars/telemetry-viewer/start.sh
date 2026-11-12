@@ -24,8 +24,9 @@ SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 [ -z "$SCRIPT_DIR" ] && SCRIPT_DIR="."
 SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 
-# Ensure default port 38472 is free so EADDRINUSE never causes startup failures
-fuser -k 38472/tcp 2>/dev/null || true
+# Ensure target WS port (default 38472) is free so EADDRINUSE never causes startup failures
+TARGET_WS_PORT="${BRBR_COMPANION_WS_PORT:-38472}"
+fuser -k "${TARGET_WS_PORT}/tcp" 2>/dev/null || true
 sleep 0.2
 
 # 1. Prefer Node.js (pure built-in standard library, zero external dependencies)
