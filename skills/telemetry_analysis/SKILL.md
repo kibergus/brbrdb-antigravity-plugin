@@ -6,7 +6,7 @@ description: Analyzes karting telemetry data using MCP server tools and corner s
 # Telemetry Analysis & Companion Skill
 
 This skill provides an autonomous, turn-by-turn workflow for analyzing karting and racing telemetry data inside Google Antigravity. It pairs conversational chat commentary on the left with the interactive **Telemetry Viewer** in Antigravity's auxiliary side panel on the right, backed by two MCP servers:
-- **`brbrdb` MCP server**: Session discovery, track geometry, lap statistics, inspection plots, and raw numeric telemetry (`get_telemetry_data`, including high-rate `raw_aux_stream` auxiliary streams).
+- **`telemetry` / `brbrdb` MCP server**: Session discovery, track geometry, lap statistics, inspection plots, and raw numeric telemetry (`get_telemetry_data`, including high-rate `raw_aux_stream` auxiliary streams).
 - **`companion` MCP server** (bundled locally with the plugin on `127.0.0.1:38472`): Live Telemetry Viewer control (`set_telemetry_view`), workspace study discovery (`list_workspace_studies`), dynamic plot group registration (`register_plot_group`), live reload (`sync_workspace_data`), and connection status (`get_telemetry_view_status`).
 
 ```
@@ -29,7 +29,7 @@ This skill provides an autonomous, turn-by-turn workflow for analyzing karting a
 
 ---
 
-## 1. Opening & Driving the Telemetry Viewer Sidecar
+## 1. Opening the Telemetry Viewer Sidecar & Selecting Laps
 
 When an analysis session is initiated or referenced:
 1. Emit a markdown pill so the user can open or focus the sidecar view in the auxiliary side panel:
@@ -38,11 +38,30 @@ When an analysis session is initiated or referenced:
    ```
 2. Drive the viewer directly using the **`companion` MCP tool `set_telemetry_view(...)`** whenever introducing a session, comparing laps, focusing a corner, or toggling custom plots and overlays:
    - `session_url`: Navigate to a session URL when changing sessions (zero-reload when already on the target session).
-   - `laps_a` / `laps_b`: Set active comparison laps (e.g. `laps_a=["14", "18"]`).
+   - `laps_a` / `laps_b`: Set active comparison laps (e.g. `laps_a=["18_43_practice_kartsim_coach_rs-25", "18_43_practice_katia_guseinova-36"]` or `["14", "18"]`).
    - `turn`: 1-indexed turn number to focus (`turn=3` focuses Turn 3), or `xlim=[290, 380]` / `map_range=[290, 380]` / `dist=316.5`.
    - `plots`: Visible bottom plots, including built-in (`"speed"`, `"delta"`, `"pedals"`, `"steering"`, `"gforce"`) and custom study groups (`"eeg"`).
    - `study`: Active study subfolder under `<workspace>/studies/` (e.g. `"2026-04-12_buckmore_eeg"`).
    - `overlays`: Explicit list of GeoJSON overlay IDs to display on the map (e.g. `["braking_zones", "apex_theta_heatmap"]`), or `[]` to clear all overlays.
+
+### Fast-Path: Opening a Session & Selecting Laps (2 Steps)
+When the user asks to open a session URL or show/compare specific laps (e.g. fastest lap by two drivers) without requesting a deep corner-by-corner coaching breakdown, follow this **2-step fast path** and **STOP** (do NOT run per-turn `get_stats`, `get_telemetry_plot`, or inspect local/remote HTML/JS files):
+
+1. **Find the lap numbers and session IDs**: Call `get_pace_summary(track, date, session_id)` (or `get_stats(track, date, session_id)`).
+2. **Construct Lap IDs (`laps_a`) and dispatch via `set_telemetry_view` (or `/api/action` fallback)**:
+   - **Lap ID Format**: Strip `.csv` from the lap's `session_id` (or `actual_best_session`) and append `-{lap_number}`.
+     - Single-driver session example: `20_06_practice-28`
+     - Multi-driver session example: `18_43_practice_kartsim_coach_rs-25` and `18_43_practice_katia_guseinova-36`
+   - **Update the sidecar session URL & active laps** in one `set_telemetry_view` call:
+     ```python
+     set_telemetry_view(
+         session_url="/telemetry/kartsim/iame_waterswift_restricted_cadet_uk/2026-11-05/Whilton%20Mill?session_id=18_43_practice&lapsA=18_43_practice_kartsim_coach_rs-25%2C18_43_practice_katia_guseinova-36&tab=map",
+         laps_a=["18_43_practice_kartsim_coach_rs-25", "18_43_practice_katia_guseinova-36"],
+         tab="map",
+     )
+     ```
+     *(If `companion` MCP is not yet loaded in the current turn, POST `{"type": "telemetry_jump", "lapsA": [...], "url": "..."}` to `http://127.0.0.1:38472/api/action`.)*
+   - Reply immediately with `[Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)` and a concise summary table.
 
 ---
 
@@ -97,7 +116,7 @@ set_telemetry_view(
 
 ### Recipe B: Custom Channels & Multi-Channel Plot Groups (e.g. Raw 500 Hz EEG -> Alpha & Theta)
 1. **Fetch High-Rate Auxiliary Samples**:
-   When a session lists an auxiliary stream (e.g. `spikerbit` at ~500 Hz), call `get_telemetry_data(..., raw_aux_stream="spikerbit")`. Each sample includes native `timestamp` alongside `Lap` and `Lap Distance` interpolated from the primary GPS stream.
+   When a session lists an auxiliary stream (e.g. `spikerbit` at ~500 Hz), call `get_telemetry_data(..., raw_aux_stream="spikerbit")`. Each sample includes native `Time` alongside `Lap` and `Lap Distance` interpolated from the primary GPS stream.
 2. **Compute Band Power / Custom Metrics in Python**:
    Run a script in `<workspace>/studies/<study_id>/scripts/` (e.g. Welch PSD / bandpass + Hilbert envelope over sliding windows for **EEG Alpha (`8–13 Hz`)** and **EEG Theta (`4–8 Hz`)**) and write `<workspace>/studies/<study_id>/channels/eeg_alpha_theta.json`:
    ```json
@@ -164,11 +183,20 @@ set_telemetry_view(
 
 ## 4. Interactive In-Text Pill Commentary
 
-Always format key telemetry evidence (braking points, apex scrub marks, throttle pickups, overlay highlights) as clickable inline pills within your conversational text.
+Always format key telemetry evidence (braking points, apex scrub marks, throttle pickups, overlay highlights) as clickable inline pills within your conversational text using Antigravity's **Generative UI (`<agent-embed>`)** system.
 
-### Generative UI Template
+> [!IMPORTANT]
+> **NEVER output ` ```html ... ``` ` code blocks directly in your chat message!** Fenced HTML blocks in chat are rendered as literal syntax-highlighted source code, NOT interactive buttons.
+>
+> You **MUST** follow this exact two-step workflow every time you render interactive telemetry pills:
+> 1. **Write the HTML file to the Artifact Directory**: Use `write_file` to save a self-contained `.html` file at `<appDataDir>/brain/<conversation-id>/<widget-name>.html` with `Overwrite: true` and `ArtifactMetadata: { "Summary": "Interactive telemetry pills", "UserFacing": true, "RequestFeedback": false }`.
+> 2. **Embed Inline with `<agent-embed>`**: In your chat response, place the `<agent-embed>` tag on its own line (outside any code fences or backticks):
+>
+> `<agent-embed src="file:///absolute/path/to/brain/<conversation-id>/<widget-name>.html"></agent-embed>`
 
-Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
+### Step-by-Step Generative UI Template
+
+**Step A — Save to `<appDataDir>/brain/<conversation-id>/turn_commentary.html` via `write_file`:**
 
 ```html
 <!DOCTYPE html>
@@ -204,7 +232,7 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
         await fetch('http://127.0.0.1:38472/api/action', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(Object.assign({ type: 'telemetry_jump' }, opts))
+          body: JSON.stringify(Object.assign({ type: 'telemetry_jump', tab: 'map' }, opts))
         });
         ack.textContent = '✓ ' + (opts.dist !== undefined ? opts.dist + 'm' : 'Synced');
         setTimeout(() => { ack.textContent = ''; }, 2000);
@@ -217,14 +245,21 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
 </html>
 ```
 
+**Step B — Output the raw `<agent-embed>` tag in your chat response (no backticks):**
+
+```markdown
+<agent-embed src="file:///home/user/.gemini/antigravity/brain/<conversation-id>/turn_commentary.html"></agent-embed>
+```
+
 ### Supported Action Properties dispatched to `/api/action`:
+- `url` (string): Relative path + query string (e.g. `"/telemetry/kartsim/.../Whilton%20Mill?session_id=18_43_practice&lapsA=...&tab=map"`) to load or switch the active session in the sidecar viewer.
+- `laps` / `lapsA` / `lapsB` (array of lap IDs): Active comparison laps formatted as `<session_id_without_csv>-<lap_number>` (e.g. `["18_43_practice_kartsim_coach_rs-25", "18_43_practice_katia_guseinova-36"]`).
 - `dist` (number): Distance in meters along track to position cursor and kart marker.
 - `xlim` / `plotRange` (array `[min, max]`): Visible X-axis meter range on bottom charts.
 - `mapRange` / `focusRange` (array `[min, max]`): Centers satellite map over track segment (`focusRange` sets both `xlim` and `mapRange`).
 - `turnNumber` (1-indexed integer) or `turn` (0-indexed integer): Focuses a numbered corner.
 - `plots` (array of strings): Visible bottom channel plots, including custom group IDs (e.g. `['speed', 'eeg']`).
 - `openPlot` / `togglePlot` (string): Idempotently open or toggle a single plot tab.
-- `laps` / `lapsA` / `lapsB` (array of lap IDs): Active comparison laps.
 - `study` (string): Active workspace study ID.
 - `overlays` (array of strings) / `toggleOverlay` (string): Active GeoJSON map overlays (`[]` clears all).
 - `tcol` (`"pedals" | "delta_t" | "speed" | "accel" | "lap"`) & `mapType` (`"satellite" | "solid_dark"`).
@@ -235,8 +270,8 @@ Embed the commentary inline using `<agent-embed>` or transparent HTML artifact:
 
 ### Step 1: Session & Data Discovery (Orchestrator)
 1. **MCP Data Loading**:
-   - Load session lists, track metadata, pace summaries, lap statistics, inspection plots, and raw numeric arrays via `brbrdb` MCP tools (`list_sessions`, `get_track_info`, `get_pace_summary`, `get_stats`, `get_telemetry_plot`, `get_trajectory_plot`, `get_telemetry_data`).
-   - Check `list_workspace_studies()` on `companion` MCP to discover existing workspace studies, overlays, and custom channels. Do NOT search outside `<workspace>/studies/` for raw server logs or databases.
+   - Load session lists, track metadata, pace summaries, lap statistics, inspection plots, and raw numeric arrays via `telemetry` / `brbrdb` MCP tools (`list_sessions`, `get_track_info`, `get_pace_summary`, `get_stats`, `get_telemetry_plot`, `get_trajectory_plot`, `get_telemetry_data`).
+   - Check `list_workspace_studies()` on `companion` MCP to discover existing workspace studies, overlays, and custom channels. Do NOT search outside `<workspace>/studies/` for raw server logs or databases, and do NOT grep HTML files or curl frontend JS to inspect URL/lap formats.
 2. **Channel Audit**:
    - Identify physically recorded primary channels (`Speed`, `accel`, `Latitude`/`Longitude` vs `Steering Angle`, `Throttle`, `Brake`) as well as any recorded auxiliary streams (`aux_streams` such as `spikerbit`).
    - Ground conclusions in available data. If a channel is absent, never present inferences as measured facts.

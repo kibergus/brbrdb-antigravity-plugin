@@ -51,7 +51,7 @@ def ensure_sidecar_running() -> bool:
         _server_ready = True
         return True
 
-    start_script = os.path.join(SCRIPT_DIR, 'start.sh')
+    server_script = os.path.join(SCRIPT_DIR, 'server.py')
     child_env = dict(os.environ)
     child_env['BRBR_COMPANION_WS_PORT'] = str(WS_PORT)
     if not child_env.get('ANTIGRAVITY_SIDECAR_WEB_PORT'):
@@ -59,7 +59,7 @@ def ensure_sidecar_running() -> bool:
 
     try:
         subprocess.Popen(
-            ['bash', start_script],
+            [sys.executable, server_script],
             cwd=CALLER_CWD,
             env=child_env,
             stdin=subprocess.DEVNULL,
@@ -68,7 +68,7 @@ def ensure_sidecar_running() -> bool:
             start_new_session=True,
         )
     except OSError as exc:
-        sys.stderr.write(f"Failed to spawn sidecar start.sh: {exc}\n")
+        sys.stderr.write(f"Failed to spawn sidecar server.py: {exc}\n")
         return False
 
     for _ in range(40):

@@ -3,8 +3,8 @@
   "description": "BrBrDb racing telemetry integration for Antigravity.",
   "restart_policy": "always",
   "has_web_ui": true,
-  "command": "./start.sh",
-  "args": [],
+  "command": "node",
+  "args": ["server.mjs"],
   "ui_config": {
     "display_name": "BrBrDb Telemetry",
     "views": [

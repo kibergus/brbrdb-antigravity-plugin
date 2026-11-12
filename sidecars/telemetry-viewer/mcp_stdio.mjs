@@ -67,14 +67,14 @@ async function ensureSidecarRunning() {
     return true;
   }
 
-  const startScript = path.join(__dirname, 'start.sh');
+  const serverScript = path.join(__dirname, 'server.mjs');
   const childEnv = {
     ...process.env,
     BRBR_COMPANION_WS_PORT: String(WS_PORT),
     ANTIGRAVITY_SIDECAR_WEB_PORT: process.env.ANTIGRAVITY_SIDECAR_WEB_PORT || String(WS_PORT),
   };
   try {
-    const child = spawn('bash', [startScript], {
+    const child = spawn(process.execPath, [serverScript], {
       cwd: CALLER_CWD,
       env: childEnv,
       detached: true,
@@ -82,7 +82,7 @@ async function ensureSidecarRunning() {
     });
     child.unref();
   } catch (err) {
-    process.stderr.write(`Failed to spawn sidecar start.sh: ${err.message}\n`);
+    process.stderr.write(`Failed to spawn sidecar server.mjs: ${err.message}\n`);
     return false;
   }
 

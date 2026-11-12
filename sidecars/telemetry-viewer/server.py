@@ -28,6 +28,7 @@ import json
 import os
 import re
 import struct
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -46,8 +47,12 @@ WS_PORT = int(
 )
 API_KEY = os.environ.get('BRBRDB_API_KEY', '').strip()
 TARGET_HOST = os.environ.get('BRBRDB_HOST', 'brbrdb.brbrkitten.com').strip()
-LOG_FILE = os.environ.get('BRBR_COMPANION_LOG_FILE') or '/tmp/telemetry_companion.log'
-STATE_FILE = os.environ.get('BRBR_COMPANION_STATE_FILE') or '/tmp/brbr_telemetry_companion_state.json'
+LOG_FILE = os.environ.get('BRBR_COMPANION_LOG_FILE') or os.path.join(
+    tempfile.gettempdir(), 'telemetry_companion.log'
+)
+STATE_FILE = os.environ.get('BRBR_COMPANION_STATE_FILE') or os.path.join(
+    tempfile.gettempdir(), 'brbr_telemetry_companion_state.json'
+)
 
 CORS_HEADERS: dict[str, str] = {
     'Access-Control-Allow-Origin': '*',

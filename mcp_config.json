@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "companion": {
-      "command": "bash",
-      "args": ["${PLUGIN_ROOT}/sidecars/telemetry-viewer/mcp.sh"]
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/sidecars/telemetry-viewer/mcp_stdio.mjs"]
     }
   }
 }
-

@@ -17,6 +17,7 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -38,8 +39,11 @@ const WS_PORT = parseInt(
 );
 const API_KEY = (process.env.BRBRDB_API_KEY || '').trim();
 const TARGET_HOST = (process.env.BRBRDB_HOST || 'brbrdb.brbrkitten.com').trim();
-const LOG_FILE = process.env.BRBR_COMPANION_LOG_FILE || '/tmp/telemetry_companion.log';
-const STATE_FILE = process.env.BRBR_COMPANION_STATE_FILE || '/tmp/brbr_telemetry_companion_state.json';
+const LOG_FILE =
+  process.env.BRBR_COMPANION_LOG_FILE || path.join(os.tmpdir(), 'telemetry_companion.log');
+const STATE_FILE =
+  process.env.BRBR_COMPANION_STATE_FILE ||
+  path.join(os.tmpdir(), 'brbr_telemetry_companion_state.json');
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -1631,7 +1635,8 @@ function createHttpHandler() {
       return;
     }
 
-    // 8. Default route serves seamless wrapper iframe
+    // 8. Default route serves a seamless wrapper pointing directly to the HTTPS host via /auth,
+    // establishing the partitioned cookie and preserving the production referrer for Google Maps.
     const rawPath =
       parsedUrl.searchParams.get('url') || parsedUrl.searchParams.get('next') || currentTelemetryPath;
     const telemetryPath = ensureCompanionParams(rawPath);
