@@ -85,6 +85,8 @@ register_plot_group(
     study="2026-04-12_buckmore_eeg_focus",
     id="eeg_bands",
     label="EEG Bands",
+    folder="neuro",
+    folder_label="EEG & Load",
     channels=[
         {"channel_id": "eeg_alpha", "label": "Alpha (8-13 Hz)", "color": "#a855f7", "yaxis": "y"},
         {"channel_id": "eeg_theta", "label": "Theta (4-8 Hz)", "color": "#06b6d4", "yaxis": "y"},
@@ -96,5 +98,8 @@ register_plot_group(
 ```
 
 - **One chart per plot group**: All `channels` in a group overlay onto **one shared plot** (`yaxis: "y"` and optional right-hand `"y2"`). Keep **1–2 compatible-scale traces per group**; register **separate** plot groups for channels with distinct units, scales, or meanings instead of crowding many traces onto one unreadable chart.
+- **Toolbar folders & layout (`folder`, `folder_label`, `layout`)**:
+  - Pass `folder="<slug>"` and `folder_label="<Label>"` on related custom plot groups to bundle 2+ groups into a single dropdown menu (single-item folders unwrap automatically unless `unwrap_single: false`).
+  - Pass `layout=[...]` (or write `"layout"` in `<study>/plot_groups.json` or `<workspace>/studies/plot_layout.json`) to control top-level tab order, mix built-in and custom groups in folders (`{"folder": "neuro", "label": "EEG & Load", "items": [...]}`), or demote secondary tabs into `{"folder": "more", "label": "•••", "overflow": true, "items": ["gforce", "rps", "eeg", "*"]}`.
 - **Built-in vs. custom IDs**: Sessions with Spiker:bit channels automatically mount built-in `eeg`, `ecg`, and `emg` tabs. Register derived groups under distinct IDs (`eeg_bands`, `eog_blinks`, `cognition`) unless you intentionally want to override the built-in tab while the study is active.
 - After editing existing channel or GeoJSON files on disk without calling `register_plot_group`, call `sync_workspace_data(study="<study_id>")` to push live updates to the viewer.

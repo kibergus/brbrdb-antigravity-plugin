@@ -308,11 +308,13 @@ function inspectStudyDir(studyDir, relStudyId) {
   const overlaysDir = path.join(studyDir, 'overlays');
   const channelsDir = path.join(studyDir, 'channels');
   const plotGroupsFile = path.join(studyDir, 'plot_groups.json');
+  const plotLayoutFile = path.join(studyDir, 'plot_layout.json');
   const readmeFile = path.join(studyDir, 'README.md');
 
   const overlayFiles = listFilesRecursive(overlaysDir, '.geojson', 4);
   const channelFiles = listFilesRecursive(channelsDir, '.json', 4);
   const hasPlotGroups = fs.existsSync(plotGroupsFile);
+  const hasPlotLayout = fs.existsSync(plotLayoutFile);
   const hasReadme = fs.existsSync(readmeFile);
 
   // Also check top-level .geojson files inside a named study folder
@@ -332,6 +334,7 @@ function inspectStudyDir(studyDir, relStudyId) {
     topGeojson.length > 0 ||
     channelFiles.length > 0 ||
     hasPlotGroups ||
+    hasPlotLayout ||
     hasReadme ||
     fs.existsSync(overlaysDir) ||
     fs.existsSync(channelsDir);
@@ -389,6 +392,14 @@ function inspectStudyDir(studyDir, relStudyId) {
       for (const g of pg.groups || []) {
         if (g && g.id) plotGroupIds.add(String(g.id));
       }
+    } catch {}
+  }
+
+  if (hasPlotLayout) {
+    try {
+      const st = fs.statSync(plotLayoutFile);
+      const mt = st.mtimeMs / 1000;
+      if (mt > latestMtime) latestMtime = mt;
     } catch {}
   }
 
@@ -525,6 +536,57 @@ function resolveCrossStudyOverlay(refStr, rootReal) {
   return null;
 }
 
+function normalizePlotLayout(rawLayout) {
+  if (!Array.isArray(rawLayout) || rawLayout.length === 0) return null;
+  const normalized = [];
+  for (const entry of rawLayout) {
+    if (typeof entry === 'string') {
+      const trimmed = entry.trim();
+      if (trimmed) {
+        normalized.push(trimmed === '*' ? '*' : trimmed.toLowerCase());
+      }
+    } else if (entry && typeof entry === 'object' && entry.folder) {
+      const folderSlug = String(entry.folder).trim().toLowerCase();
+      if (!folderSlug) continue;
+      const rawItems = Array.isArray(entry.items) ? entry.items : [];
+      const items = [];
+      for (const it of rawItems) {
+        if (typeof it === 'string' && it.trim()) {
+          const s = it.trim();
+          items.push(s === '*' ? '*' : s.toLowerCase());
+        }
+      }
+      const spec = {
+        folder: folderSlug,
+        label: entry.label ? String(entry.label).trim() : folderSlug,
+        items,
+      };
+      if (entry.overflow !== undefined && entry.overflow !== null) {
+        spec.overflow = Boolean(entry.overflow);
+      }
+      if (entry.unwrap_single !== undefined && entry.unwrap_single !== null) {
+        spec.unwrap_single = Boolean(entry.unwrap_single);
+      }
+      normalized.push(spec);
+    }
+  }
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readLayoutFile(filePath, diagnostics, label) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (Array.isArray(parsed)) return normalizePlotLayout(parsed);
+    if (parsed && typeof parsed === 'object' && 'layout' in parsed) {
+      return normalizePlotLayout(parsed.layout);
+    }
+  } catch (err) {
+    diagnostics.push(`Invalid ${label}: ${err.message}`);
+  }
+  return null;
+}
+
 function buildManifest(query = {}) {
   const studies = discoverStudies();
   const requestedStudy =
@@ -537,6 +599,7 @@ function buildManifest(query = {}) {
   const channels = [];
   const channelMap = new Map();
   const plotGroups = [];
+  let plotLayout = null;
   const diagnostics = [];
 
   let rootReal = path.resolve(studiesDir);
@@ -615,6 +678,8 @@ function buildManifest(query = {}) {
             color: ch.color ? String(ch.color) : '#38bdf8',
             group: ch.group ? String(ch.group).toLowerCase() : '',
             group_label: ch.group_label ? String(ch.group_label) : '',
+            folder: ch.folder ? String(ch.folder).trim().toLowerCase() : '',
+            folder_label: ch.folder_label ? String(ch.folder_label).trim() : '',
             match: ch.match || null,
             study: requestedStudy,
             path: relFile,
@@ -634,7 +699,10 @@ function buildManifest(query = {}) {
     if (fs.existsSync(plotGroupsPath)) {
       try {
         const pgData = JSON.parse(fs.readFileSync(plotGroupsPath, 'utf8'));
-        for (const rawGroup of pgData.groups || []) {
+        if (pgData && typeof pgData === 'object' && 'layout' in pgData) {
+          plotLayout = normalizePlotLayout(pgData.layout);
+        }
+        for (const rawGroup of (pgData && pgData.groups) || []) {
           if (!rawGroup || !rawGroup.id) continue;
           const gId = String(rawGroup.id).toLowerCase();
           registeredGroupIds.add(gId);
@@ -653,6 +721,8 @@ function buildManifest(query = {}) {
           plotGroups.push({
             id: gId,
             label: rawGroup.label ? String(rawGroup.label) : gId.toUpperCase(),
+            folder: rawGroup.folder ? String(rawGroup.folder).trim().toLowerCase() : '',
+            folder_label: rawGroup.folder_label ? String(rawGroup.folder_label).trim() : '',
             y_label: rawGroup.y_label ? String(rawGroup.y_label) : '',
             y2_label: rawGroup.y2_label ? String(rawGroup.y2_label) : '',
             y_range: Array.isArray(rawGroup.y_range) && rawGroup.y_range.length === 2 ? rawGroup.y_range : null,
@@ -665,6 +735,10 @@ function buildManifest(query = {}) {
       }
     }
 
+    if (plotLayout === null) {
+      plotLayout = readLayoutFile(path.join(studyDir, 'plot_layout.json'), diagnostics, 'plot_layout.json');
+    }
+
     // Synthesize plot groups for channels whose group is not explicitly listed in plot_groups.json
     const autoGroups = new Map();
     for (const ch of channels) {
@@ -673,12 +747,18 @@ function buildManifest(query = {}) {
         autoGroups.set(ch.group, {
           id: ch.group,
           label: ch.group_label || ch.group.toUpperCase(),
+          folder: ch.folder || '',
+          folder_label: ch.folder_label || '',
           y_label: ch.unit || '',
           y2_label: '',
           y_range: null,
           color_mode: 'channel',
           channels: [],
         });
+      } else {
+        const existingGroup = autoGroups.get(ch.group);
+        if (!existingGroup.folder && ch.folder) existingGroup.folder = ch.folder;
+        if (!existingGroup.folder_label && ch.folder_label) existingGroup.folder_label = ch.folder_label;
       }
       autoGroups.get(ch.group).channels.push({
         channel_id: ch.channel_id,
@@ -691,6 +771,10 @@ function buildManifest(query = {}) {
     for (const g of autoGroups.values()) {
       plotGroups.push(g);
     }
+  }
+
+  if (plotLayout === null && fs.existsSync(rootReal) && fs.statSync(rootReal).isDirectory()) {
+    plotLayout = readLayoutFile(path.join(rootReal, 'plot_layout.json'), diagnostics, 'studies/plot_layout.json');
   }
 
   // Resolve any cross-study overlays requested in query.overlays or activeOverlays
@@ -717,7 +801,8 @@ function buildManifest(query = {}) {
     studies: studies.map((s) => [s.id, s.mtime, s.overlays, s.channels, s.plot_groups]),
     overlays: overlays.map((o) => [o.id, o.path, o.mtime]),
     channels: channels.map((c) => [c.channel_id, c.path, c.mtime]),
-    plotGroups: plotGroups.map((g) => [g.id, g.label, g.channels]),
+    plotGroups: plotGroups.map((g) => [g.id, g.label, g.folder, g.folder_label, g.channels]),
+    plotLayout,
   });
   const etag = crypto.createHash('sha1').update(etagPayload).digest('hex').slice(0, 16);
 
@@ -733,6 +818,7 @@ function buildManifest(query = {}) {
     overlays,
     channels,
     plot_groups: plotGroups,
+    plot_layout: plotLayout,
     diagnostics,
   };
 }
@@ -1069,6 +1155,19 @@ const MCP_TOOLS = [
           type: 'string',
           description: 'Target study subfolder relative to <workspace>/studies/ (defaults to active study).',
         },
+        folder: {
+          type: 'string',
+          description: 'Optional toolbar folder slug (e.g. "neuro") to bundle related custom groups into a dropdown menu.',
+        },
+        folder_label: {
+          type: 'string',
+          description: 'Optional display label for the toolbar folder button (e.g. "EEG & Load").',
+        },
+        layout: {
+          type: 'array',
+          items: {},
+          description: 'Optional full toolbar layout array (group IDs, FolderSpec objects, and "*") saved to plot_groups.json#layout.',
+        },
         y_label: {
           type: 'string',
           description: 'Primary Y-axis label (e.g. "Band Power (Z-score)").',
@@ -1281,13 +1380,31 @@ function executeMcpTool(name, args = {}) {
     if (fs.existsSync(safeTarget.fullPath)) {
       try {
         const parsed = JSON.parse(fs.readFileSync(safeTarget.fullPath, 'utf8'));
-        if (parsed && Array.isArray(parsed.groups)) existing = parsed;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          existing = parsed;
+          if (!Array.isArray(existing.groups)) existing.groups = [];
+        }
       } catch {}
+    }
+
+    if ('layout' in args) {
+      if (args.layout === null) {
+        delete existing.layout;
+      } else if (Array.isArray(args.layout)) {
+        const normLayout = normalizePlotLayout(args.layout);
+        if (normLayout !== null) {
+          existing.layout = normLayout;
+        } else {
+          delete existing.layout;
+        }
+      }
     }
 
     const groupEntry = {
       id: groupSlug,
       label: String(args.label || groupSlug.toUpperCase()),
+      folder: args.folder ? String(args.folder).trim().toLowerCase() : '',
+      folder_label: args.folder_label ? String(args.folder_label).trim() : '',
       y_label: args.y_label ? String(args.y_label) : '',
       y2_label: args.y2_label ? String(args.y2_label) : '',
       y_range: Array.isArray(args.y_range) && args.y_range.length === 2 ? args.y_range : null,

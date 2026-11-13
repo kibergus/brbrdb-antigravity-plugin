@@ -339,11 +339,13 @@ def inspect_study_dir(study_dir: str, rel_study_id: str) -> dict[str, Any] | Non
     overlays_dir = os.path.join(study_dir, 'overlays')
     channels_dir = os.path.join(study_dir, 'channels')
     plot_groups_file = os.path.join(study_dir, 'plot_groups.json')
+    plot_layout_file = os.path.join(study_dir, 'plot_layout.json')
     readme_file = os.path.join(study_dir, 'README.md')
 
     overlay_files = list_files_recursive(overlays_dir, '.geojson', 4)
     channel_files = list_files_recursive(channels_dir, '.json', 4)
     has_plot_groups = os.path.exists(plot_groups_file)
+    has_plot_layout = os.path.exists(plot_layout_file)
     has_readme = os.path.exists(readme_file)
 
     top_geojson: list[str] = []
@@ -360,6 +362,7 @@ def inspect_study_dir(study_dir: str, rel_study_id: str) -> dict[str, Any] | Non
         or len(top_geojson) > 0
         or len(channel_files) > 0
         or has_plot_groups
+        or has_plot_layout
         or has_readme
         or os.path.exists(overlays_dir)
         or os.path.exists(channels_dir)
@@ -431,6 +434,14 @@ def inspect_study_dir(study_dir: str, rel_study_id: str) -> dict[str, Any] | Non
                     if isinstance(g, dict) and g.get('id'):
                         plot_group_ids.add(str(g['id']))
         except (OSError, json.JSONDecodeError):
+            pass
+
+    if has_plot_layout:
+        try:
+            mt = os.stat(plot_layout_file).st_mtime
+            if mt > latest_mtime:
+                latest_mtime = mt
+        except OSError:
             pass
 
     return {
@@ -565,6 +576,53 @@ def resolve_cross_study_overlay(ref_str: str, root_real: str) -> dict[str, Any] 
     return None
 
 
+def normalize_plot_layout(raw_layout: Any) -> list[Any] | None:
+    if not isinstance(raw_layout, list) or len(raw_layout) == 0:
+        return None
+    normalized: list[Any] = []
+    for entry in raw_layout:
+        if isinstance(entry, str):
+            trimmed = entry.strip()
+            if trimmed:
+                normalized.append(trimmed if trimmed == '*' else trimmed.lower())
+        elif isinstance(entry, dict) and entry.get('folder'):
+            folder_slug = str(entry['folder']).strip().lower()
+            if not folder_slug:
+                continue
+            raw_items = entry.get('items') if isinstance(entry.get('items'), list) else []
+            items: list[str] = []
+            for it in raw_items:
+                if isinstance(it, str) and it.strip():
+                    s = it.strip()
+                    items.append(s if s == '*' else s.lower())
+            spec: dict[str, Any] = {
+                'folder': folder_slug,
+                'label': str(entry['label']).strip() if entry.get('label') else folder_slug,
+                'items': items,
+            }
+            if 'overflow' in entry and entry['overflow'] is not None:
+                spec['overflow'] = bool(entry['overflow'])
+            if 'unwrap_single' in entry and entry['unwrap_single'] is not None:
+                spec['unwrap_single'] = bool(entry['unwrap_single'])
+            normalized.append(spec)
+    return normalized if normalized else None
+
+
+def read_layout_file(file_path: str, diagnostics: list[str], label: str) -> list[Any] | None:
+    if not os.path.exists(file_path):
+        return None
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            parsed = json.load(f)
+        if isinstance(parsed, list):
+            return normalize_plot_layout(parsed)
+        if isinstance(parsed, dict) and 'layout' in parsed:
+            return normalize_plot_layout(parsed.get('layout'))
+    except (OSError, json.JSONDecodeError) as err:
+        diagnostics.append(f"Invalid {label}: {err}")
+    return None
+
+
 def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
     q = query or {}
     studies = discover_studies()
@@ -579,6 +637,7 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
     channels: list[dict[str, Any]] = []
     channel_map: dict[str, dict[str, Any]] = {}
     plot_groups: list[dict[str, Any]] = []
+    plot_layout: list[Any] | None = None
     diagnostics: list[str] = []
 
     root_real = os.path.abspath(studies_dir)
@@ -663,6 +722,8 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
                         'color': str(ch['color']) if ch.get('color') else '#38bdf8',
                         'group': str(ch['group']).lower() if ch.get('group') else '',
                         'group_label': str(ch['group_label']) if ch.get('group_label') else '',
+                        'folder': str(ch['folder']).strip().lower() if ch.get('folder') else '',
+                        'folder_label': str(ch['folder_label']).strip() if ch.get('folder_label') else '',
                         'match': ch.get('match') or None,
                         'study': requested_study,
                         'path': rel_file,
@@ -680,6 +741,8 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
             try:
                 with open(plot_groups_path, 'r', encoding='utf-8') as f:
                     pg_data = json.load(f)
+                if isinstance(pg_data, dict) and 'layout' in pg_data:
+                    plot_layout = normalize_plot_layout(pg_data.get('layout'))
                 raw_groups = pg_data.get('groups', []) if isinstance(pg_data, dict) else []
                 for raw_group in raw_groups:
                     if not isinstance(raw_group, dict) or not raw_group.get('id'):
@@ -702,9 +765,17 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
                         })
                     raw_yr = raw_group.get('y_range')
                     y_range = raw_yr if isinstance(raw_yr, list) and len(raw_yr) == 2 else None
+                    folder_slug = (
+                        str(raw_group['folder']).strip().lower() if raw_group.get('folder') else ''
+                    )
+                    folder_label = (
+                        str(raw_group['folder_label']).strip() if raw_group.get('folder_label') else ''
+                    )
                     plot_groups.append({
                         'id': g_id,
                         'label': str(raw_group['label']) if raw_group.get('label') else g_id.upper(),
+                        'folder': folder_slug,
+                        'folder_label': folder_label,
                         'y_label': str(raw_group['y_label']) if raw_group.get('y_label') else '',
                         'y2_label': str(raw_group['y2_label']) if raw_group.get('y2_label') else '',
                         'y_range': y_range,
@@ -713,6 +784,13 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
                     })
             except (OSError, json.JSONDecodeError) as err:
                 diagnostics.append(f"Invalid plot_groups.json: {err}")
+
+        if plot_layout is None:
+            plot_layout = read_layout_file(
+                os.path.join(study_dir, 'plot_layout.json'),
+                diagnostics,
+                'plot_layout.json',
+            )
 
         auto_groups: dict[str, dict[str, Any]] = {}
         for ch in channels:
@@ -723,12 +801,19 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
                 auto_groups[grp] = {
                     'id': grp,
                     'label': ch['group_label'] or grp.upper(),
+                    'folder': ch.get('folder') or '',
+                    'folder_label': ch.get('folder_label') or '',
                     'y_label': ch['unit'] or '',
                     'y2_label': '',
                     'y_range': None,
                     'color_mode': 'channel',
                     'channels': [],
                 }
+            else:
+                if not auto_groups[grp]['folder'] and ch.get('folder'):
+                    auto_groups[grp]['folder'] = ch['folder']
+                if not auto_groups[grp]['folder_label'] and ch.get('folder_label'):
+                    auto_groups[grp]['folder_label'] = ch['folder_label']
             auto_groups[grp]['channels'].append({
                 'channel_id': ch['channel_id'],
                 'label': ch['label'],
@@ -738,6 +823,13 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
             })
         for g in auto_groups.values():
             plot_groups.append(g)
+
+    if plot_layout is None and os.path.isdir(root_real):
+        plot_layout = read_layout_file(
+            os.path.join(root_real, 'plot_layout.json'),
+            diagnostics,
+            'studies/plot_layout.json',
+        )
 
     extra_refs: set[str] = set(active_overlays)
     if q.get('overlays'):
@@ -759,7 +851,11 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
             'studies': [[s['id'], s['mtime'], s['overlays'], s['channels'], s['plot_groups']] for s in studies],
             'overlays': [[o['id'], o['path'], o['mtime']] for o in overlays],
             'channels': [[c['channel_id'], c['path'], c['mtime']] for c in channels],
-            'plotGroups': [[g['id'], g['label'], g['channels']] for g in plot_groups],
+            'plotGroups': [
+                [g['id'], g['label'], g['folder'], g['folder_label'], g['channels']]
+                for g in plot_groups
+            ],
+            'plotLayout': plot_layout,
         },
         separators=(',', ':'),
     )
@@ -777,6 +873,7 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
         'overlays': overlays,
         'channels': channels,
         'plot_groups': plot_groups,
+        'plot_layout': plot_layout,
         'diagnostics': diagnostics,
     }
 
@@ -1144,6 +1241,25 @@ MCP_TOOLS: list[dict[str, Any]] = [
                     'type': 'string',
                     'description': 'Target study subfolder relative to <workspace>/studies/.',
                 },
+                'folder': {
+                    'type': 'string',
+                    'description': (
+                        'Optional toolbar folder slug (e.g. "neuro") to bundle related custom groups '
+                        'into a dropdown menu.'
+                    ),
+                },
+                'folder_label': {
+                    'type': 'string',
+                    'description': 'Optional display label for the toolbar folder button (e.g. "EEG & Load").',
+                },
+                'layout': {
+                    'type': 'array',
+                    'items': {},
+                    'description': (
+                        'Optional full toolbar layout array (group IDs, FolderSpec objects, and "*") '
+                        'saved to plot_groups.json#layout.'
+                    ),
+                },
                 'y_label': {
                     'type': 'string',
                     'description': 'Primary Y-axis label (e.g. "Band Power (Z-score)").',
@@ -1379,15 +1495,35 @@ async def execute_mcp_tool(name: str, args: dict[str, Any] | None = None) -> dic
             try:
                 with open(target_fp, 'r', encoding='utf-8') as f:
                     parsed = json.load(f)
-                if isinstance(parsed, dict) and isinstance(parsed.get('groups'), list):
+                if isinstance(parsed, dict):
                     existing = parsed
+                    if not isinstance(existing.get('groups'), list):
+                        existing['groups'] = []
             except (OSError, json.JSONDecodeError):
                 pass
 
+        if 'layout' in tool_args:
+            if tool_args['layout'] is None:
+                existing.pop('layout', None)
+            elif isinstance(tool_args['layout'], list):
+                norm_layout = normalize_plot_layout(tool_args['layout'])
+                if norm_layout is not None:
+                    existing['layout'] = norm_layout
+                else:
+                    existing.pop('layout', None)
+
         raw_yr = tool_args.get('y_range')
+        folder_slug = (
+            str(tool_args['folder']).strip().lower() if tool_args.get('folder') else ''
+        )
+        folder_label = (
+            str(tool_args['folder_label']).strip() if tool_args.get('folder_label') else ''
+        )
         group_entry: dict[str, Any] = {
             'id': group_slug,
             'label': str(tool_args.get('label') or group_slug.upper()),
+            'folder': folder_slug,
+            'folder_label': folder_label,
             'y_label': str(tool_args['y_label']) if tool_args.get('y_label') else '',
             'y2_label': str(tool_args['y2_label']) if tool_args.get('y2_label') else '',
             'y_range': raw_yr if isinstance(raw_yr, list) and len(raw_yr) == 2 else None,
