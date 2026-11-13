@@ -70,26 +70,39 @@ function log(msg) {
 
 function isGlobalPluginDir(dirPath) {
   if (!dirPath) return true;
-  const norm = dirPath.replace(/\\/g, '/');
-  return norm.includes('/.gemini/config/plugins') || norm.includes('/.gemini/antigravity/builtin');
+  const candidates = [dirPath];
+  try {
+    candidates.push(fs.realpathSync(dirPath));
+  } catch {}
+  return candidates.some((p) => {
+    const norm = p.replace(/\\/g, '/');
+    return (
+      norm.includes('/.gemini/config/plugins') ||
+      norm.includes('/.gemini/antigravity/builtin') ||
+      norm.includes('/.agents/plugins')
+    );
+  });
 }
 
 function inferDefaultWorkspaceDir() {
-  // Check if running inside <workspace>/.agents/plugins/brbrtelemetry/...
-  const normScript = __dirname.replace(/\\/g, '/');
-  const marker = '/.agents/plugins/';
-  const idx = normScript.indexOf(marker);
-  if (idx > 0) {
-    const candidate = __dirname.slice(0, idx);
-    if (fs.existsSync(candidate)) {
-      return path.resolve(candidate);
+  // Check if running inside <workspace>/.agents/plugins/brbrtelemetry/... (including via symlink)
+  const scriptDirs = [__dirname];
+  try {
+    const realDir = fs.realpathSync(__dirname);
+    if (realDir !== __dirname) scriptDirs.push(realDir);
+  } catch {}
+  for (const dir of scriptDirs) {
+    const normScript = dir.replace(/\\/g, '/');
+    const marker = '/.agents/plugins/';
+    const idx = normScript.indexOf(marker);
+    if (idx > 0) {
+      const candidate = dir.slice(0, idx);
+      if (fs.existsSync(candidate)) {
+        return path.resolve(candidate);
+      }
     }
   }
-  const cwd = process.cwd();
-  if (!isGlobalPluginDir(cwd)) {
-    return path.resolve(cwd);
-  }
-  return path.resolve(cwd);
+  return path.resolve(process.cwd());
 }
 
 function loadPersistedState() {
@@ -102,16 +115,21 @@ function loadPersistedState() {
 }
 
 const persisted = loadPersistedState();
+const validPersistedWorkspace =
+  persisted.workspaceDir &&
+  !isGlobalPluginDir(persisted.workspaceDir) &&
+  fs.existsSync(persisted.workspaceDir)
+    ? path.resolve(persisted.workspaceDir)
+    : '';
+
 let explicitWorkspaceBound = Boolean(
-  process.env.BRBR_STUDIES_DIR || process.env.BRBR_WORKSPACE_DIR || persisted.workspaceDir
+  process.env.BRBR_STUDIES_DIR || process.env.BRBR_WORKSPACE_DIR || validPersistedWorkspace
 );
 
 let workspaceDir = (() => {
   if (process.env.BRBR_WORKSPACE_DIR) return path.resolve(process.env.BRBR_WORKSPACE_DIR);
   if (process.env.BRBR_STUDIES_DIR) return path.dirname(path.resolve(process.env.BRBR_STUDIES_DIR));
-  if (persisted.workspaceDir && fs.existsSync(persisted.workspaceDir)) {
-    return path.resolve(persisted.workspaceDir);
-  }
+  if (validPersistedWorkspace) return validPersistedWorkspace;
   return inferDefaultWorkspaceDir();
 })();
 
@@ -992,18 +1010,18 @@ const MCP_TOOLS = [
   {
     name: 'register_plot_group',
     description:
-      'Creates or updates a custom bottom-bar plot group (e.g. "eeg" / "EEG") in <workspace>/studies/<study>/plot_groups.json and immediately syncs the Telemetry Viewer UI.',
+      'Creates or updates a custom bottom-bar plot group (e.g. "eeg_bands" / "EEG Bands") in <workspace>/studies/<study>/plot_groups.json and immediately syncs the Telemetry Viewer UI. All channels in a group overlay on one chart (y/y2 axes)—register separate groups for distinct scales, and avoid id="eeg"/"ecg"/"emg" unless intentionally overriding built-in sensor tabs.',
     inputSchema: {
       type: 'object',
       required: ['id', 'label', 'channels'],
       properties: {
         id: {
           type: 'string',
-          description: 'Plot group identifier (lowercase slug, e.g. "eeg").',
+          description: 'Plot group identifier (lowercase slug, e.g. "eeg_bands").',
         },
         label: {
           type: 'string',
-          description: 'Display label on the bottom plot tab button (e.g. "EEG").',
+          description: 'Display label on the bottom plot tab button (e.g. "EEG Bands").',
         },
         study: {
           type: 'string',

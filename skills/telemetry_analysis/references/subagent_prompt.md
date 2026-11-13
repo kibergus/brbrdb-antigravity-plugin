@@ -43,11 +43,10 @@ Your mission is to analyze driver telemetry exclusively for this corner to deter
      - **Inferred (Medium Confidence)**: Derived from surrogate channels (e.g. `accel` profile).
      - **Hypothesis (Low-to-Medium Confidence)**: Unmeasured driver actions (e.g. steering corrections when steering angle is not recorded). Must be labeled explicitly as a hypothesis.
 
-4. **Interactive Report Section Generation**:
-   Produce an HTML commentary section ready to be embedded into the report companion with interactive data triggers:
-   - Enclose the generation prompt and investigation parameters in an HTML comment block (`<!-- Prompt / Generation Context: ... -->`) immediately below the JSON header.
-   - Specific meter marks for braking, apex, and throttle pickup formatted as `<button class="telemetry-jump-btn" data-dist="<m>" data-xlim="<min>,<max>">...m</button>`.
-   - Relevant bottom channel plot triggers keeping opened plots under 3 so the track map remains visible (e.g. `data-plots="speed,steering,delta"` or `data-plots="speed,pedals,delta"`).
-   - Map focus triggers (e.g. `data-map-range="{START_M},{END_M}"`).
-   - Friendly, positive, actionable visual coaching takeaways written for junior drivers (~11 years old) using `km/h` exclusively.
+4. **Return Structured Corner Findings**:
+   Return concise, data-grounded findings for Turn {TURN_NAME} so the orchestrator can render `<agent-embed>` chat pills (or `report_template.html` if publishing):
+   - **Key Meter Marks**: Exact track distances (`m`) for braking/deceleration start, apex(es), and throttle/exit pickup, plus recommended `focusRange` (`[{START_M}, {END_M}]`) and up to 2–3 relevant plot IDs (e.g. `["speed", "pedals", "delta"]`).
+   - **Metrics Summary (`km/h` & `s`)**: Benchmark vs. Target turn time, entry speed, min apex speed, corner exit speed, and straight exit speed.
+   - **Confidence-Tagged Causation Bullets**: Each claim labeled `Direct Evidence`, `Inferred`, or `Hypothesis`.
+   - **Junior Coaching Takeaways**: 1–3 positive, specific takeaways (~11-year-old tone, `km/h` exclusively).
 ```

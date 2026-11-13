@@ -89,20 +89,39 @@ def log(msg: str) -> None:
 def is_global_plugin_dir(dir_path: str) -> bool:
     if not dir_path:
         return True
-    norm = dir_path.replace('\\', '/')
-    return '/.gemini/config/plugins' in norm or '/.gemini/antigravity/builtin' in norm
+    candidates = [dir_path]
+    try:
+        candidates.append(os.path.realpath(dir_path))
+    except OSError:
+        pass
+    for p in candidates:
+        norm = p.replace('\\', '/')
+        if (
+            '/.gemini/config/plugins' in norm
+            or '/.gemini/antigravity/builtin' in norm
+            or '/.agents/plugins' in norm
+        ):
+            return True
+    return False
 
 
 def infer_default_workspace_dir() -> str:
-    norm_script = SCRIPT_DIR.replace('\\', '/')
-    marker = '/.agents/plugins/'
-    idx = norm_script.find(marker)
-    if idx > 0:
-        candidate = SCRIPT_DIR[:idx]
-        if os.path.exists(candidate):
-            return os.path.abspath(candidate)
-    cwd = os.getcwd()
-    return os.path.abspath(cwd)
+    script_dirs = [SCRIPT_DIR]
+    try:
+        real_dir = os.path.realpath(SCRIPT_DIR)
+        if real_dir != SCRIPT_DIR:
+            script_dirs.append(real_dir)
+    except OSError:
+        pass
+    for d in script_dirs:
+        norm_script = d.replace('\\', '/')
+        marker = '/.agents/plugins/'
+        idx = norm_script.find(marker)
+        if idx > 0:
+            candidate = d[:idx]
+            if os.path.exists(candidate):
+                return os.path.abspath(candidate)
+    return os.path.abspath(os.getcwd())
 
 
 def load_persisted_state() -> dict[str, Any]:
@@ -130,10 +149,20 @@ def normalize_study_id(raw: Any) -> str:
 
 
 _persisted = load_persisted_state()
+_persisted_ws_raw = _persisted.get('workspaceDir')
+_valid_persisted_ws: str = (
+    os.path.abspath(_persisted_ws_raw)
+    if isinstance(_persisted_ws_raw, str)
+    and _persisted_ws_raw
+    and not is_global_plugin_dir(_persisted_ws_raw)
+    and os.path.exists(_persisted_ws_raw)
+    else ''
+)
+
 explicit_workspace_bound: bool = bool(
     os.environ.get('BRBR_STUDIES_DIR')
     or os.environ.get('BRBR_WORKSPACE_DIR')
-    or _persisted.get('workspaceDir')
+    or _valid_persisted_ws
 )
 
 
@@ -144,9 +173,8 @@ def _init_workspace_dir() -> str:
     env_studies = os.environ.get('BRBR_STUDIES_DIR')
     if env_studies:
         return os.path.dirname(os.path.abspath(env_studies))
-    persisted_ws = _persisted.get('workspaceDir')
-    if isinstance(persisted_ws, str) and persisted_ws and os.path.exists(persisted_ws):
-        return os.path.abspath(persisted_ws)
+    if _valid_persisted_ws:
+        return _valid_persisted_ws
     return infer_default_workspace_dir()
 
 
@@ -1046,8 +1074,10 @@ MCP_TOOLS: list[dict[str, Any]] = [
     {
         'name': 'register_plot_group',
         'description': (
-            'Creates or updates a custom bottom-bar plot group (e.g. "eeg" / "EEG") in '
-            '<workspace>/studies/<study>/plot_groups.json and immediately syncs the Telemetry Viewer UI.'
+            'Creates or updates a custom bottom-bar plot group (e.g. "eeg_bands" / "EEG Bands") in '
+            '<workspace>/studies/<study>/plot_groups.json and immediately syncs the Telemetry Viewer UI. '
+            'All channels in a group overlay on one chart (y/y2 axes)—register separate groups for '
+            'distinct scales, and avoid id="eeg"/"ecg"/"emg" unless intentionally overriding built-in sensor tabs.'
         ),
         'inputSchema': {
             'type': 'object',
@@ -1055,11 +1085,11 @@ MCP_TOOLS: list[dict[str, Any]] = [
             'properties': {
                 'id': {
                     'type': 'string',
-                    'description': 'Plot group identifier (lowercase slug, e.g. "eeg").',
+                    'description': 'Plot group identifier (lowercase slug, e.g. "eeg_bands").',
                 },
                 'label': {
                     'type': 'string',
-                    'description': 'Display label on the bottom plot tab button (e.g. "EEG").',
+                    'description': 'Display label on the bottom plot tab button (e.g. "EEG Bands").',
                 },
                 'study': {
                     'type': 'string',
