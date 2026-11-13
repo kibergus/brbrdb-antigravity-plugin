@@ -6,7 +6,7 @@ description: Analyzes karting and racing telemetry data, session URLs (/telemetr
 # Telemetry Analysis & Companion Skill
 
 Pairs conversational telemetry analysis on the left with the interactive **BrBrDb Telemetry** viewer in Antigravity's auxiliary side panel on the right, backed by two MCP servers:
-- **`telemetry` MCP server**: Session discovery (`list_sessions`), track geometry (`get_track_info`), lap statistics (`get_pace_summary`, `get_stats`, `get_aggregates`), static inspection plots, and numeric sample arrays (`get_telemetry_data`).
+- **`telemetry` MCP server**: Session discovery (`list_sessions`), track geometry (`get_track_info`), lap statistics (`get_pace_summary`, `get_stats`, `get_aggregates`), static inspection plots, and numeric sample arrays (`get_telemetry_data`, including high-rate `raw_aux_stream` auxiliary streams).
 - **`brbrtelemetry_companion` MCP server** (local sidecar on `127.0.0.1:38472`): Live viewer control (`set_telemetry_view`), study discovery (`list_workspace_studies`), custom plot-group registration (`register_plot_group`), live reload (`sync_workspace_data`), and connection status (`get_telemetry_view_status`).
 
 > [!IMPORTANT]

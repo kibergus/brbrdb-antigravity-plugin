@@ -78,6 +78,8 @@ function isGlobalPluginDir(dirPath) {
     const norm = p.replace(/\\/g, '/');
     return (
       norm.includes('/.gemini/config/plugins') ||
+      norm.includes('/.gemini/plugins') ||
+      norm.includes('/.gemini/antigravity/plugins') ||
       norm.includes('/.gemini/antigravity/builtin') ||
       norm.includes('/.agents/plugins')
     );
@@ -738,12 +740,19 @@ function buildManifest(query = {}) {
 log(`Telemetry Companion (Pure Node Zero-Dep) starting... UI_PORT=${UI_PORT}, WS_PORT=${WS_PORT}, WORKSPACE=${workspaceDir}`);
 
 const wsClients = new Set();
+const wsWrapperClients = new Set();
 let latestAction = { type: 'telemetry_jump', dist: 0, timestamp: new Date().toISOString() };
 let currentTelemetryPath = `/telemetry/kartsim/iame_waterswift_restricted_cadet_uk/2026-11-04/Whilton%20Mill%20Zulu?tab=map&lapsA=20_06_practice-28%2C20_06_practice-20&visA=1&turn=4&dist=654.4&delta=1&speed=1&rtab=report&companion=1&ws_port=${WS_PORT}`;
 
 function ensureCompanionParams(urlOrPath) {
   if (!urlOrPath) return urlOrPath;
-  let res = urlOrPath;
+  let res = String(urlOrPath).trim();
+  if (/^https?:\/\//i.test(res)) {
+    try {
+      const u = new URL(res);
+      res = `${u.pathname || '/'}${u.search || ''}${u.hash || ''}`;
+    } catch {}
+  }
   if (!res.includes('companion=')) {
     const sep = res.includes('?') ? '&' : '?';
     res = `${res}${sep}companion=1`;
@@ -753,6 +762,12 @@ function ensureCompanionParams(urlOrPath) {
     res = `${res}${sep}ws_port=${WS_PORT}`;
   }
   return res;
+}
+
+function buildAuthTarget(telemetryPath) {
+  return API_KEY
+    ? `https://${TARGET_HOST}/auth?key=${encodeURIComponent(API_KEY)}&next=${encodeURIComponent(telemetryPath)}`
+    : `https://${TARGET_HOST}/auth?next=${encodeURIComponent(telemetryPath)}`;
 }
 
 function encodeTextFrame(str) {
@@ -785,6 +800,25 @@ function broadcastJson(payloadObj) {
         sentCount++;
       }
     } catch {}
+  }
+  const targetSession = payloadObj && (payloadObj.sessionUrl || payloadObj.url);
+  if (sentCount === 0 && targetSession && wsWrapperClients.size > 0) {
+    const navPath = ensureCompanionParams(String(targetSession));
+    const wrapperFrame = encodeTextFrame(
+      JSON.stringify({
+        type: 'wrapper_navigate',
+        sessionUrl: navPath,
+        authTarget: buildAuthTarget(navPath),
+      })
+    );
+    for (const wClient of wsWrapperClients) {
+      try {
+        if (!wClient.destroyed && wClient.writable) {
+          wClient.write(wrapperFrame);
+          sentCount++;
+        }
+      } catch {}
+    }
   }
   return sentCount;
 }
@@ -837,8 +871,13 @@ function handleWebSocketUpgrade(req, socket) {
       `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
   );
 
-  wsClients.add(socket);
-  log(`Viewer connected to companion WebSocket (active clients: ${wsClients.size})`);
+  const isWrapper = String(req.url || '').includes('role=wrapper');
+  if (isWrapper) {
+    wsWrapperClients.add(socket);
+  } else {
+    wsClients.add(socket);
+    log(`Viewer connected to companion WebSocket (active clients: ${wsClients.size})`);
+  }
 
   const readyFrame = encodeTextFrame(
     JSON.stringify({
@@ -870,6 +909,9 @@ function handleWebSocketUpgrade(req, socket) {
   });
 
   const cleanup = () => {
+    if (wsWrapperClients.has(socket)) {
+      wsWrapperClients.delete(socket);
+    }
     if (wsClients.has(socket)) {
       wsClients.delete(socket);
       log(`Viewer disconnected from companion WebSocket (remaining: ${wsClients.size})`);
@@ -1707,9 +1749,7 @@ function createHttpHandler() {
     const rawPath =
       parsedUrl.searchParams.get('url') || parsedUrl.searchParams.get('next') || currentTelemetryPath;
     const telemetryPath = ensureCompanionParams(rawPath);
-    const authTarget = API_KEY
-      ? `https://${TARGET_HOST}/auth?key=${encodeURIComponent(API_KEY)}&next=${encodeURIComponent(telemetryPath)}`
-      : `https://${TARGET_HOST}/auth?next=${encodeURIComponent(telemetryPath)}`;
+    const authTarget = buildAuthTarget(telemetryPath);
     const wrapperHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1725,10 +1765,28 @@ function createHttpHandler() {
   <script>
     window.addEventListener('message', (e) => {
       const f = document.getElementById('viewer');
-      if (f && f.contentWindow) {
+      if (f && f.contentWindow && e.source !== f.contentWindow) {
         try { f.contentWindow.postMessage(e.data, '*'); } catch (_) {}
       }
     });
+    (function connectWrapperWs() {
+      try {
+        const ws = new WebSocket('ws://127.0.0.1:${WS_PORT}/ws?role=wrapper');
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg && msg.type === 'wrapper_navigate' && msg.authTarget) {
+              const f = document.getElementById('viewer');
+              if (f) f.src = msg.authTarget;
+            }
+          } catch (_) {}
+        };
+        ws.onclose = () => setTimeout(connectWrapperWs, 3000);
+        ws.onerror = () => { try { ws.close(); } catch (_) {} };
+      } catch (_) {
+        setTimeout(connectWrapperWs, 3000);
+      }
+    })();
   </script>
 </body>
 </html>`;

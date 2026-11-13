@@ -98,6 +98,8 @@ def is_global_plugin_dir(dir_path: str) -> bool:
         norm = p.replace('\\', '/')
         if (
             '/.gemini/config/plugins' in norm
+            or '/.gemini/plugins' in norm
+            or '/.gemini/antigravity/plugins' in norm
             or '/.gemini/antigravity/builtin' in norm
             or '/.agents/plugins' in norm
         ):
@@ -780,6 +782,7 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 ws_clients: set[asyncio.StreamWriter] = set()
+ws_wrapper_clients: set[asyncio.StreamWriter] = set()
 latest_action: dict[str, Any] = {
     'type': 'telemetry_jump',
     'dist': 0,
@@ -795,7 +798,14 @@ current_telemetry_path: str = (
 def ensure_companion_params(path: str) -> str:
     if not path:
         return path
-    res = path
+    res = str(path).strip()
+    if res.lower().startswith(('http://', 'https://')):
+        parsed = urlparse(res)
+        res = parsed.path or '/'
+        if parsed.query:
+            res = f"{res}?{parsed.query}"
+        if parsed.fragment:
+            res = f"{res}#{parsed.fragment}"
     if 'companion=' not in res:
         sep = '&' if '?' in res else '?'
         res = f"{res}{sep}companion=1"
@@ -803,6 +813,12 @@ def ensure_companion_params(path: str) -> str:
         sep = '&' if '?' in res else '?'
         res = f"{res}{sep}ws_port={WS_PORT}"
     return res
+
+
+def build_auth_target(telemetry_path: str) -> str:
+    if API_KEY:
+        return f"https://{TARGET_HOST}/auth?key={quote(API_KEY, safe='')}&next={quote(telemetry_path, safe='')}"
+    return f"https://{TARGET_HOST}/auth?next={quote(telemetry_path, safe='')}"
 
 
 def encode_text_frame(message: str) -> bytes:
@@ -836,6 +852,29 @@ async def broadcast(message_dict: dict[str, Any]) -> int:
 
     for dead in dead_clients:
         ws_clients.discard(dead)
+
+    target_session = message_dict.get('sessionUrl') or message_dict.get('url')
+    if sent_count == 0 and target_session and ws_wrapper_clients:
+        nav_path = ensure_companion_params(str(target_session))
+        wrapper_frame = encode_text_frame(json.dumps({
+            'type': 'wrapper_navigate',
+            'sessionUrl': nav_path,
+            'authTarget': build_auth_target(nav_path),
+        }))
+        dead_wrappers: set[asyncio.StreamWriter] = set()
+        for w_writer in list(ws_wrapper_clients):
+            try:
+                if not w_writer.is_closing():
+                    w_writer.write(wrapper_frame)
+                    await w_writer.drain()
+                    sent_count += 1
+                else:
+                    dead_wrappers.add(w_writer)
+            except (OSError, ConnectionResetError):
+                dead_wrappers.add(w_writer)
+        for dead_w in dead_wrappers:
+            ws_wrapper_clients.discard(dead_w)
+
     return sent_count
 
 
@@ -866,7 +905,12 @@ async def watch_studies_loop() -> None:
                 })
 
 
-async def handle_websocket(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, key: str) -> None:
+async def handle_websocket(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    key: str,
+    is_wrapper: bool = False,
+) -> None:
     """Handle RFC 6455 WebSocket connection."""
     guid = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
     accept_val = base64.b64encode(hashlib.sha1((key + guid).encode('utf-8')).digest()).decode('ascii')
@@ -880,8 +924,11 @@ async def handle_websocket(reader: asyncio.StreamReader, writer: asyncio.StreamW
     writer.write(handshake_resp.encode('utf-8'))
     await writer.drain()
 
-    ws_clients.add(writer)
-    log(f"Viewer connected to companion WebSocket (active clients: {len(ws_clients)})")
+    if is_wrapper:
+        ws_wrapper_clients.add(writer)
+    else:
+        ws_clients.add(writer)
+        log(f"Viewer connected to companion WebSocket (active clients: {len(ws_clients)})")
 
     ready_frame = encode_text_frame(json.dumps({
         'type': 'COMPANION_READY',
@@ -929,8 +976,10 @@ async def handle_websocket(reader: asyncio.StreamReader, writer: asyncio.StreamW
     except (asyncio.IncompleteReadError, ConnectionResetError, OSError):
         pass
     finally:
-        ws_clients.discard(writer)
-        log(f"Viewer disconnected from companion WebSocket (remaining: {len(ws_clients)})")
+        ws_wrapper_clients.discard(writer)
+        if writer in ws_clients:
+            ws_clients.discard(writer)
+            log(f"Viewer disconnected from companion WebSocket (remaining: {len(ws_clients)})")
         try:
             writer.close()
             await writer.wait_closed()
@@ -1609,7 +1658,12 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
         if headers.get('upgrade', '').lower() == 'websocket':
             ws_key = headers.get('sec-websocket-key')
             if ws_key:
-                await handle_websocket(reader, writer, ws_key)
+                await handle_websocket(
+                    reader,
+                    writer,
+                    ws_key,
+                    is_wrapper=('role=wrapper' in raw_target),
+                )
                 return
 
         if method == 'OPTIONS':
@@ -1861,10 +1915,7 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
             or current_telemetry_path
         )
         telemetry_path = ensure_companion_params(raw_next)
-        if API_KEY:
-            auth_target = f"https://{TARGET_HOST}/auth?key={quote(API_KEY)}&next={quote(telemetry_path)}"
-        else:
-            auth_target = f"https://{TARGET_HOST}/auth?next={quote(telemetry_path)}"
+        auth_target = build_auth_target(telemetry_path)
 
         wrapper_html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1881,10 +1932,28 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
   <script>
     window.addEventListener('message', (e) => {{
       const f = document.getElementById('viewer');
-      if (f && f.contentWindow) {{
+      if (f && f.contentWindow && e.source !== f.contentWindow) {{
         try {{ f.contentWindow.postMessage(e.data, '*'); }} catch (_) {{}}
       }}
     }});
+    (function connectWrapperWs() {{
+      try {{
+        const ws = new WebSocket('ws://127.0.0.1:{WS_PORT}/ws?role=wrapper');
+        ws.onmessage = (ev) => {{
+          try {{
+            const msg = JSON.parse(ev.data);
+            if (msg && msg.type === 'wrapper_navigate' && msg.authTarget) {{
+              const f = document.getElementById('viewer');
+              if (f) f.src = msg.authTarget;
+            }}
+          }} catch (_) {{}}
+        }};
+        ws.onclose = () => setTimeout(connectWrapperWs, 3000);
+        ws.onerror = () => {{ try {{ ws.close(); }} catch (_) {{}} }};
+      }} catch (_) {{
+        setTimeout(connectWrapperWs, 3000);
+      }}
+    }})();
   </script>
 </body>
 </html>"""
