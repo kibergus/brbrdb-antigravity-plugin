@@ -1,13 +1,20 @@
 ---
 name: telemetry_analysis
-description: Analyzes karting telemetry data using MCP server tools and corner sub-agents, comparing reference benchmark vs target laps with Delta T inflection analysis and data-grounded causation chains, producing interactive chat commentary and synchronized controls for the Antigravity Telemetry Viewer companion side panel.
+description: Analyzes karting and racing telemetry data, session URLs (/telemetry/<league>/<class>/<date>/<track>), and logged channels using the telemetry and companion MCP servers—without using external browser automation—producing data-grounded insights and synchronized controls for the Antigravity Telemetry Viewer side panel.
 ---
 
 # Telemetry Analysis & Companion Skill
 
-This skill provides an autonomous, turn-by-turn workflow for analyzing karting and racing telemetry data inside Google Antigravity. It pairs conversational chat commentary on the left with the interactive **Telemetry Viewer** in Antigravity's auxiliary side panel on the right, backed by two MCP servers:
-- **`telemetry` / `brbrdb` MCP server**: Session discovery, track geometry, lap statistics, inspection plots, and raw numeric telemetry (`get_telemetry_data`, including high-rate `raw_aux_stream` auxiliary streams).
-- **`companion` MCP server** (bundled locally with the plugin on `127.0.0.1:38472`): Live Telemetry Viewer control (`set_telemetry_view`), workspace study discovery (`list_workspace_studies`), dynamic plot group registration (`register_plot_group`), live reload (`sync_workspace_data`), and connection status (`get_telemetry_view_status`).
+This skill provides an autonomous, turn-by-turn workflow for inspecting and analyzing karting and racing telemetry data inside Google Antigravity. It pairs conversational chat commentary on the left with the interactive **Telemetry Viewer** in Antigravity's auxiliary side panel on the right, backed by two MCP servers:
+- **`telemetry` / `brbrdb` MCP server**: Session discovery (`list_sessions`), track geometry (`get_track_info`), lap statistics (`get_stats`, `get_pace_summary`, `get_aggregates`), inspection plots, and raw numeric telemetry (`get_telemetry_data`, including high-rate auxiliary streams).
+- **`companion` (`brbrtelemetry_companion`) MCP server** (bundled locally with the plugin on `127.0.0.1:38472`): Live Telemetry Viewer control (`set_telemetry_view`), workspace study discovery (`list_workspace_studies`), dynamic plot group registration (`register_plot_group`), live reload (`sync_workspace_data`), and connection status (`get_telemetry_view_status`).
+
+> [!IMPORTANT]
+> **Do NOT use the `browser` subagent, `curl`, or web scraping for telemetry URLs.**
+> When a user shares a telemetry URL (such as `https://<host>/telemetry/<league>/<class_name>/<date>/<track>?session_id=<session_id>`), treat it as a structured session identifier, NOT an external web page to browse:
+> 1. Parse `league`, `class_name`, `date`, URL-decoded `track`, and `session_id` directly from the URL.
+> 2. Query the **`telemetry` MCP server** (`list_sessions`, `get_telemetry_data`, `get_pace_summary`, `get_stats`) to answer questions about sessions, channels, or laps.
+> 3. When visual UI interaction is needed, drive the integrated **Telemetry Viewer sidecar** via the `companion` MCP server (`set_telemetry_view`) rather than launching a browser subagent.
 
 ```
 +-----------------------------------------------------------------------------------+
@@ -32,9 +39,9 @@ This skill provides an autonomous, turn-by-turn workflow for analyzing karting a
 ## 1. Opening the Telemetry Viewer Sidecar & Selecting Laps
 
 When an analysis session is initiated or referenced:
-1. Emit a markdown pill so the user can open or focus the sidecar view in the auxiliary side panel:
+1. Emit a markdown pill (matching `sidecar.json`'s view `title` per `ui-plugin-navigation`) so the user can open or focus the sidecar view in the auxiliary side panel:
    ```markdown
-   [Open Telemetry Viewer](sidecar://brbrtelemetry/telemetry-viewer/)
+   [BrBrDb Telemetry](sidecar://brbrtelemetry/telemetry-viewer/)
    ```
 2. Drive the viewer directly using the **`companion` MCP tool `set_telemetry_view(...)`** whenever introducing a session, comparing laps, focusing a corner, or toggling custom plots and overlays:
    - `session_url`: Navigate to a session URL when changing sessions (zero-reload when already on the target session).
@@ -102,8 +109,8 @@ When generating local overlays, custom telemetry channels, or analysis scripts i
 
 ### Recipe A: GeoJSON Vector & Heatmap Map Overlays
 Write standard WGS84 (`[longitude, latitude]`) GeoJSON `FeatureCollection` files into `<workspace>/studies/<study_id>/overlays/<name>.geojson`:
-- **Vector overlay (`metadata.render = "vector"`)**: Supports `Point`, `LineString`, `Polygon`, per-feature style overrides (`strokeColor`, `strokeWeight`, `fillColor`, `fillOpacity`, `radius`, `label`, `tooltip`), or scalar colormaps (`value_property`, `colormap` in `"turbo" | "inferno" | "viridis" | "rdylgn" | "coolwarm"`, `domain`, `unit`).
-- **Heatmap overlay (`metadata.render = "heatmap"`)**: Renders smooth Gaussian spatial heatmaps (`radius_m`, `opacity`, `value_property`, `colormap`, `domain`, `unit`) for continuous spatial metrics such as tyre scrub intensity or EEG cognitive load around the circuit.
+- **Vector overlay (`metadata.render = "vector"`)**: Supports `Point`, `LineString`, `Polygon`, per-feature style overrides (`strokeColor`, `strokeWeight`, `fillColor`, `fillOpacity`, `radius`, `label`, `tooltip`), or scalar colormaps (`value_property`, `colormap` in `"turbo" | "inferno" | "viridis" | "plasma" | "magma" | "hot" | "ylorrd" | "rdylgn" | "coolwarm"` plus `*_r` reversed variants, `domain`, `unit`).
+- **Heatmap overlay (`metadata.render = "heatmap"`)**: Renders smooth Gaussian spatial heatmaps (`radius_m`, `opacity`, `value_property`, `colormap` including `"turbo" | "inferno" | "viridis" | "plasma" | "magma" | "hot" | "ylorrd" | "rdylgn" | "coolwarm"` and `*_r`, `domain`, `unit`) for continuous spatial metrics such as tyre scrub intensity or EEG cognitive load around the circuit.
 
 After writing or updating an overlay file, call:
 ```python
@@ -163,12 +170,13 @@ set_telemetry_view(
    ```
    *(Series support `"align": "distance"` where `x` is track meters per lap, or `"align": "time"` where `x` is session elapsed seconds.)*
 3. **Register & Open the Plot Tab**:
-   Call `register_plot_group` on the `companion` MCP server to mount the `EEG` tab next to `Pedals` / `Steering` and open it immediately:
+   Sessions recorded with Spiker:bit automatically mount built-in `eeg`, `ecg`, and `emg` tabs for the native 100 Hz bin-averaged columns (`plots=["speed", "eeg"]`).
+   To keep both the built-in `EEG` tab and your derived traces (e.g. blink detection or Alpha/Theta band power) available side-by-side, register your custom plot group under a distinct `id` such as `id="eeg_bands"` or `id="eeg_blinks"` (using `id="eeg"` intentionally overrides the built-in `EEG` tab while that study is active):
    ```python
    register_plot_group(
        study="2026-04-12_buckmore_eeg_focus",
-       id="eeg",
-       label="EEG",
+       id="eeg_bands",
+       label="EEG Bands",
        channels=[
            {"channel_id": "eeg_alpha", "label": "Alpha (8-13 Hz)", "color": "#a855f7"},
            {"channel_id": "eeg_theta", "label": "Theta (4-8 Hz)", "color": "#06b6d4"},

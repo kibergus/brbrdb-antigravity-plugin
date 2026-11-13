@@ -1134,6 +1134,7 @@ function dispatchActionPayload(rawArgs) {
   if (rawArgs.zoom !== undefined) payload.zoom = rawArgs.zoom;
   if (rawArgs.turn !== undefined && rawArgs.turn !== null) {
     payload.turnNumber = Number(rawArgs.turn);
+    payload.turn = Number(rawArgs.turn);
   }
   if (rawArgs.plots !== undefined) payload.plots = rawArgs.plots;
   if (rawArgs.toggle_plot !== undefined) payload.togglePlot = rawArgs.toggle_plot;
@@ -1144,15 +1145,22 @@ function dispatchActionPayload(rawArgs) {
   lastWatchedEtag = computeWatchSnapshotEtag();
 
   let syncSent = 0;
-  if (rawArgs.workspace_dir !== undefined || rawArgs.study !== undefined || rawArgs.overlays !== undefined) {
+  if (
+    rawArgs.workspace_dir !== undefined ||
+    rawArgs.study !== undefined ||
+    rawArgs.overlays !== undefined ||
+    rawArgs.toggle_overlay !== undefined
+  ) {
     syncSent = broadcastJson({
       type: 'workspace_sync',
       study: activeStudy,
+      activeOverlays,
       etag: lastWatchedEtag,
       httpBase: getHttpBase(),
       timestamp: payload.timestamp,
     });
   }
+  log(`Dispatched MCP action: ${JSON.stringify(payload)} to ${wsClients.size} viewer client(s)`);
   const sentCount = broadcastJson(payload);
   return {
     ok: true,
@@ -1500,8 +1508,13 @@ function createHttpHandler() {
           const payload = JSON.parse(body || '{}');
           if (payload.workspace_dir) applyWorkspaceOverride(payload.workspace_dir);
           if (payload.study !== undefined) activeStudy = normalizeStudyId(payload.study);
-          if (payload.overlays !== undefined && Array.isArray(payload.overlays)) {
-            activeOverlays = payload.overlays.map(String);
+          const ovList = Array.isArray(payload.overlays)
+            ? payload.overlays
+            : Array.isArray(payload.activeOverlays)
+              ? payload.activeOverlays
+              : undefined;
+          if (ovList !== undefined) {
+            activeOverlays = ovList.map(String);
           }
           savePersistedState();
           const manifest = buildManifest({ study: activeStudy });
@@ -1509,6 +1522,7 @@ function createHttpHandler() {
           const notified = broadcastJson({
             type: 'workspace_sync',
             study: activeStudy,
+            activeOverlays,
             etag: manifest.etag,
             httpBase: getHttpBase(),
             timestamp: new Date().toISOString(),
@@ -1579,6 +1593,9 @@ function createHttpHandler() {
         try {
           const body = await readRequestBody(clientReq);
           const payload = JSON.parse(body || '{}');
+          if (payload.workspace_dir) {
+            applyWorkspaceOverride(payload.workspace_dir);
+          }
           if (payload.url) {
             currentTelemetryPath = ensureCompanionParams(payload.url);
             payload.sessionUrl = currentTelemetryPath;
@@ -1593,15 +1610,47 @@ function createHttpHandler() {
           }
           if (Array.isArray(payload.overlays)) {
             activeOverlays = payload.overlays.map(String);
+            payload.overlays = activeOverlays;
+          }
+          const toggleOv = payload.toggleOverlay !== undefined ? payload.toggleOverlay : payload.toggle_overlay;
+          if (toggleOv !== undefined && toggleOv !== null) {
+            const tId = String(toggleOv);
+            const idx = activeOverlays.indexOf(tId);
+            if (idx >= 0) activeOverlays.splice(idx, 1);
+            else activeOverlays.push(tId);
+            payload.toggleOverlay = tId;
+          }
+          if (payload.turn !== undefined && payload.turn !== null && payload.turnNumber === undefined) {
+            payload.turnNumber = Number(payload.turn);
+          } else if (payload.turnNumber !== undefined && payload.turnNumber !== null && payload.turn === undefined) {
+            payload.turn = Number(payload.turnNumber);
           }
           savePersistedState();
           if (!payload.type) payload.type = 'telemetry_jump';
           payload.timestamp = new Date().toISOString();
           latestAction = payload;
+          lastWatchedEtag = computeWatchSnapshotEtag();
+
+          let syncSent = 0;
+          if (
+            payload.workspace_dir !== undefined ||
+            payload.study !== undefined ||
+            payload.overlays !== undefined ||
+            toggleOv !== undefined
+          ) {
+            syncSent = broadcastJson({
+              type: 'workspace_sync',
+              study: activeStudy,
+              activeOverlays,
+              etag: lastWatchedEtag,
+              httpBase: getHttpBase(),
+              timestamp: payload.timestamp,
+            });
+          }
 
           log(`Dispatched action: ${JSON.stringify(payload)} to ${wsClients.size} viewer client(s)`);
           const sentCount = broadcastJson(payload);
-          sendJson(clientRes, 200, { ok: true, sentTo: sentCount, action: payload });
+          sendJson(clientRes, 200, { ok: true, sentTo: Math.max(sentCount, syncSent), action: payload });
         } catch (err) {
           sendJson(clientRes, 400, { error: err.message });
         }

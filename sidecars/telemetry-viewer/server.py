@@ -1210,6 +1210,7 @@ async def dispatch_action_payload(raw_args: dict[str, Any]) -> dict[str, Any]:
         payload['zoom'] = raw_args['zoom']
     if 'turn' in raw_args and raw_args['turn'] is not None:
         payload['turnNumber'] = int(raw_args['turn'])
+        payload['turn'] = int(raw_args['turn'])
     if 'plots' in raw_args and raw_args['plots'] is not None:
         payload['plots'] = raw_args['plots']
     if 'toggle_plot' in raw_args and raw_args['toggle_plot'] is not None:
@@ -1223,14 +1224,19 @@ async def dispatch_action_payload(raw_args: dict[str, Any]) -> dict[str, Any]:
     last_watched_etag = compute_watch_snapshot_etag()
 
     sync_sent = 0
-    if any(k in raw_args and raw_args[k] is not None for k in ('workspace_dir', 'study', 'overlays')):
+    if any(
+        k in raw_args and raw_args[k] is not None
+        for k in ('workspace_dir', 'study', 'overlays', 'toggle_overlay')
+    ):
         sync_sent = await broadcast({
             'type': 'workspace_sync',
             'study': active_study,
+            'activeOverlays': active_overlays,
             'etag': last_watched_etag,
             'httpBase': get_http_base(),
             'timestamp': payload['timestamp'],
         })
+    log(f"Dispatched MCP action: {json.dumps(payload)} to {len(ws_clients)} viewer client(s)")
     sent_count = await broadcast(payload)
     return {
         'ok': True,
@@ -1658,14 +1664,22 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
                         apply_workspace_override(payload['workspace_dir'])
                     if 'study' in payload and payload['study'] is not None:
                         active_study = normalize_study_id(payload['study'])
-                    if isinstance(payload.get('overlays'), list):
-                        active_overlays = [str(x) for x in payload['overlays']]
+                    ov_list = (
+                        payload.get('overlays')
+                        if isinstance(payload.get('overlays'), list)
+                        else payload.get('activeOverlays')
+                        if isinstance(payload.get('activeOverlays'), list)
+                        else None
+                    )
+                    if ov_list is not None:
+                        active_overlays = [str(x) for x in ov_list]
                     save_persisted_state()
                     manifest = build_manifest({'study': active_study})
                     last_watched_etag = str(manifest['etag'])
                     notified = await broadcast({
                         'type': 'workspace_sync',
                         'study': active_study,
+                        'activeOverlays': active_overlays,
                         'etag': manifest['etag'],
                         'httpBase': get_http_base(),
                         'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -1729,6 +1743,8 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
                 try:
                     raw_body = await read_body_bytes(reader, headers, initial_body)
                     payload = json.loads(raw_body.decode('utf-8') or '{}')
+                    if payload.get('workspace_dir'):
+                        apply_workspace_override(payload['workspace_dir'])
                     if payload.get('url'):
                         current_telemetry_path = ensure_companion_params(str(payload['url']))
                         payload['sessionUrl'] = current_telemetry_path
@@ -1740,15 +1756,49 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
                         payload['study'] = active_study
                     if isinstance(payload.get('overlays'), list):
                         active_overlays = [str(x) for x in payload['overlays']]
+                        payload['overlays'] = active_overlays
+                    toggle_ov = (
+                        payload.get('toggleOverlay')
+                        if payload.get('toggleOverlay') is not None
+                        else payload.get('toggle_overlay')
+                    )
+                    if toggle_ov is not None:
+                        t_id = str(toggle_ov)
+                        if t_id in active_overlays:
+                            active_overlays.remove(t_id)
+                        else:
+                            active_overlays.append(t_id)
+                        payload['toggleOverlay'] = t_id
+                    if payload.get('turn') is not None and payload.get('turnNumber') is None:
+                        payload['turnNumber'] = int(payload['turn'])
+                    elif payload.get('turnNumber') is not None and payload.get('turn') is None:
+                        payload['turn'] = int(payload['turnNumber'])
                     save_persisted_state()
                     if not payload.get('type'):
                         payload['type'] = 'telemetry_jump'
                     payload['timestamp'] = datetime.now(timezone.utc).isoformat()
                     latest_action = payload
+                    last_watched_etag = compute_watch_snapshot_etag()
+
+                    sync_sent = 0
+                    if (
+                        payload.get('workspace_dir') is not None
+                        or 'study' in payload
+                        or 'overlays' in payload
+                        or toggle_ov is not None
+                    ):
+                        sync_sent = await broadcast({
+                            'type': 'workspace_sync',
+                            'study': active_study,
+                            'activeOverlays': active_overlays,
+                            'etag': last_watched_etag,
+                            'httpBase': get_http_base(),
+                            'timestamp': payload['timestamp'],
+                        })
 
                     log(f"Dispatched action: {json.dumps(payload)} to {len(ws_clients)} viewer client(s)")
                     sent = await broadcast(payload)
-                    await send_json(writer, 200, {'ok': True, 'sentTo': sent, 'action': payload})
+                    await send_json(writer, 200, {'ok': True, 'sentTo': max(sent, sync_sent), 'action': payload})
                 except Exception as err:
                     await send_json(writer, 400, {'error': str(err)})
                 return
