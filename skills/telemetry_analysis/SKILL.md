@@ -42,14 +42,15 @@ Store generated GeoJSON overlays, derived channels, and analysis scripts under `
 <workspace>/studies/<study_id>/
 ├── README.md
 ├── overlays/<name>.geojson      # Vector or Gaussian heatmap layers
+├── overlays/<name>.json         # Declarative brbr.cursor_overlay.v1 cursor layers
 ├── channels/<name>.json         # brbr.custom_channel.v1 series
 ├── plot_groups.json             # Managed via register_plot_group
 └── scripts/<script>.py
 ```
 
 - **Check Existing Studies First**: Call `list_workspace_studies()` before creating new folders so prior work can be reused or compared.
-- **Explicit Overlay Selection**: Activating `study="<study_id>"` scopes custom channels/tabs to that study. Never auto-dump all GeoJSON files onto the map—pass `overlays=[...]` explicitly in `set_telemetry_view` (or `overlays=[]` to clear).
-- **Creating Overlays, Derived Channels, or Plot Groups**: Read [overlays_and_channels.md](references/overlays_and_channels.md) first for exact GeoJSON `metadata`, `brbr.custom_channel.v1` (`session_id` stem matching & dynamic `sample_rate_hz` handling), and `register_plot_group` rules (1–2 compatible traces per chart; distinct IDs from built-in `eeg`/`ecg`/`emg`).
+- **Explicit Overlay Selection**: Activating `study="<study_id>"` scopes custom channels/tabs to that study. Never auto-dump all GeoJSON/JSON overlay files onto the map—pass `overlays=[...]` explicitly in `set_telemetry_view` (or `overlays=[]` to clear; `"gaze_sightline"` is auto-registered on sessions containing `Gaze Heading`).
+- **Creating Overlays, Derived Channels, or Plot Groups**: Read [overlays_and_channels.md](references/overlays_and_channels.md) first for exact GeoJSON `metadata`, `brbr.cursor_overlay.v1`, `brbr.custom_channel.v1` (`session_id` stem matching & dynamic `sample_rate_hz` handling), and `register_plot_group` rules (1–2 compatible traces per chart; distinct IDs from built-in `eeg`/`ecg`/`emg`/`gaze`).
 
 ---
 
@@ -103,7 +104,7 @@ Format key spatial evidence (braking points, apexes, sensor events, overlay togg
 ### `/api/action` Payload Keys (camelCase equivalents of `set_telemetry_view`)
 - **Session & Laps**: `url` / `sessionUrl` (relative or full `/telemetry/...` URL), `lapsA` / `lapsB` (array of `<session_stem>-<lap>`), `tab` (`"map" | "stats"`), `rtab` (`"cornering" | "acceleration" | "slip_angle" | "report"`).
 - **Cursor & Framing**: `dist` (meters), `turn` / `turnNumber` (**both 1-indexed**, e.g. `1` = Turn 1), `focusRange` (`[min, max]` sets both map & X-axis), `xlim` (`[min, max]` plot only), `mapRange` (`[min, max]` map only).
-- **Plots & Study Layers**: `plots` (array of visible plot IDs, e.g. `["speed", "delta", "eeg_bands"]`), `openPlot` / `togglePlot` (string), `study` (string), `overlays` (array, `[]` clears all), `toggleOverlay` (string).
+- **Plots & Study Layers**: `plots` (array of visible plot IDs, e.g. `["speed", "delta", "gaze"]`), `openPlot` / `togglePlot` (string), `study` (string), `overlays` (array, e.g. `["gaze_sightline"]`, `[]` clears all), `toggleOverlay` (string).
 - **Map Styling**: `tcol` (`"pedals" | "speed" | "group" | "sector" | "none"`), `mapType` (`"satellite" | "kartsim" | "hybrid"`).
 
 ---
@@ -112,6 +113,9 @@ Format key spatial evidence (braking points, apexes, sensor events, overlay togg
 
 1. **Channel Audit & Grounded Evidence**:
    - Inspect recorded channels via `list_sessions` / `get_telemetry_data` (`Speed`, `accel`, GPS `Latitude`/`Longitude`, `Steering Angle`, `Throttle`, `Brake`, `EEG`/`ECG`/`EMG`, etc.). Do not search outside `<workspace>/studies/` for server logs/DBs.
+   - **Reconstructed 3D Gaze Channels** (computed when driving camera pose `Local Cam Quat` / `Cam Quat` in `NED + FRD` and `tobii_gaze` `Gaze X`/`Gaze Y` are logged):
+     - `Gaze Heading` (`deg` `[0, 360)` compass bearing clockwise from North), `Gaze Yaw Offset` (`deg` `[-180, +180)` relative to `Kart Heading`: `+` = looking right of kart nose, `-` = looking left), and `Gaze Pitch` (`deg` relative to world horizon: `+` = looking up, `-` = looking down). Eye blinks and TV-camera cuts produce `null`/`NaN` gaps—report gaps honestly rather than interpolating across them.
+     - Visually sync with `plots=["speed", "gaze"]` (stacked `Gaze Yaw Offset` + `Gaze Pitch` plot showing saccade/fixation switches) and `overlays=["gaze_sightline"]` (fixed-length `60 m` map sightline ray, viewing cone, and `{Gaze Yaw Offset:+.0f}°` badge). Look for when gaze switches from braking reference -> turn-in apex -> exit horizon (earlier apex-to-exit switch correlates with confident throttle pickup).
    - Calibrate confidence strictly to logged sensors:
      - **Direct Evidence (High)**: Measured traces (`Speed`, `Delta T`, GPS line, logged sensors).
      - **Inferred (Medium)**: Surrogates (e.g. longitudinal `accel` when pedals are unlogged).

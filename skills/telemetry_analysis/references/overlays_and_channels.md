@@ -39,6 +39,53 @@ Write standard WGS84 (`[longitude, latitude]`) GeoJSON `FeatureCollection` files
 
 ---
 
+## 1b. Declarative Cursor-Synchronized Overlays (`overlays/<id>.json`)
+
+For interactive cursor-linked vectors on the Google Map (e.g. reconstructed driver gaze sightlines, heading vectors, or target fixations synced to the distance slider and bottom-plot hover), write a JSON spec with `"schema": "brbr.cursor_overlay.v1"` and `"render": "cursor"` into `<workspace>/studies/<study_id>/overlays/<id>.json`:
+
+```json
+{
+  "schema": "brbr.cursor_overlay.v1",
+  "id": "custom_gaze",
+  "label": "Custom Gaze",
+  "render": "cursor",
+  "angle_channels": ["Gaze Heading"],
+  "signed_angle_channels": ["Gaze Yaw Offset"],
+  "primitives": [
+    { "type": "kart_marker", "radius_px": 5 },
+    {
+      "type": "ray",
+      "heading_channel": "Gaze Heading",
+      "length_m": 60,
+      "cone_deg": 6,
+      "width": 2,
+      "opacity": 0.9
+    },
+    {
+      "type": "target",
+      "heading_channel": "Gaze Heading",
+      "length_m": 60,
+      "value_channel": "Gaze Pitch",
+      "colormap": "coolwarm",
+      "domain": [-15, 15],
+      "radius_px": 4.5,
+      "badge_template": "{Gaze Yaw Offset:+.0f}°"
+    }
+  ]
+}
+```
+
+- **Supported primitives**:
+  - `kart_marker`: Draws the vehicle dot at the cursor distance (`radius_px`).
+  - `ray`: Draws a fixed-length or channel-driven sightline (and optional shaded viewing sector when `cone_deg > 0`) from the vehicle position via `(heading_channel, length_m / length_channel)` or `(lat_channel, lon_channel)`.
+  - `target`: Draws the fixation marker (optionally colormap-scaled by `value_channel`) plus a live readout pill formatted via `badge_template` (`{ChannelName:.0f}`, `{ChannelName:+.1f}`).
+  - `trail`: Plots a recent path behind the current slider cursor (`lookback_m`, `step_m`, `max_jump_m` default `25`, `lat_channel`/`lon_channel` or `heading_channel` + `length_m`/`length_channel`), breaking cleanly across `null`/`NaN` gaps and large jumps.
+- Use `angle_channels` for `[0, 360)` compass bearings and `signed_angle_channels` for `[-180, +180)` signed offsets (such as `Gaze Yaw Offset`) so interpolation wraps shortest-path across `±180°`.
+- Any referenced telemetry channel is fetched lazily from the session and cached per `(session_id, channel)`; custom channels loaded on `lap.points` (`_custom_<id>`) also resolve by ID.
+- Sessions with `Gaze Heading` automatically register the built-in `"gaze_sightline"` (`Driver Gaze`) preset (`length_m: 60` along `Gaze Heading`) without requiring a study file.
+
+---
+
 ## 2. Custom Derived Channels (`channels/<name>.json`)
 
 1. **Fetch Recorded Samples**:

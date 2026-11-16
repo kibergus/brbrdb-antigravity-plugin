@@ -306,7 +306,20 @@ def resolve_safe_study_path(
     return {'ok': True, 'fullPath': candidate, 'rootReal': root_real, 'relPath': rel_norm}
 
 
-def list_files_recursive(base_dir: str, ext_filter: str, max_depth: int = 5) -> list[str]:
+def _strip_overlay_ext(name: str) -> str:
+    lower = name.lower()
+    if lower.endswith('.geojson'):
+        return name[:-8]
+    if lower.endswith('.json'):
+        return name[:-5]
+    return name
+
+
+def list_files_recursive(
+    base_dir: str,
+    ext_filter: str | tuple[str, ...],
+    max_depth: int = 5,
+) -> list[str]:
     results: list[str] = []
     if not os.path.exists(base_dir):
         return results
@@ -342,7 +355,7 @@ def inspect_study_dir(study_dir: str, rel_study_id: str) -> dict[str, Any] | Non
     plot_layout_file = os.path.join(study_dir, 'plot_layout.json')
     readme_file = os.path.join(study_dir, 'README.md')
 
-    overlay_files = list_files_recursive(overlays_dir, '.geojson', 4)
+    overlay_files = list_files_recursive(overlays_dir, ('.geojson', '.json'), 4)
     channel_files = list_files_recursive(channels_dir, '.json', 4)
     has_plot_groups = os.path.exists(plot_groups_file)
     has_plot_layout = os.path.exists(plot_layout_file)
@@ -378,9 +391,7 @@ def inspect_study_dir(study_dir: str, rel_study_id: str) -> dict[str, Any] | Non
 
     overlay_ids: list[str] = []
     for fp in overlay_files:
-        rel = os.path.relpath(fp, overlays_dir).replace('\\', '/')
-        if rel.lower().endswith('.geojson'):
-            rel = rel[:-8]
+        rel = _strip_overlay_ext(os.path.relpath(fp, overlays_dir).replace('\\', '/'))
         overlay_ids.append(rel)
         try:
             mt = os.stat(fp).st_mtime
@@ -530,24 +541,34 @@ def build_overlay_descriptor(
         pass
 
     meta: dict[str, Any] = {}
+    parsed_top: dict[str, Any] = {}
     try:
         with open(full_file_path, 'r', encoding='utf-8') as f:
             parsed = json.load(f)
-        if isinstance(parsed, dict) and isinstance(parsed.get('metadata'), dict):
-            meta = parsed['metadata']
+        if isinstance(parsed, dict):
+            parsed_top = parsed
+            if isinstance(parsed.get('metadata'), dict):
+                meta = parsed['metadata']
     except (OSError, json.JSONDecodeError):
         pass
 
-    base_stem = os.path.basename(full_file_path)
-    if base_stem.lower().endswith('.geojson'):
-        base_stem = base_stem[:-8]
-    ov_id = id_override or (str(meta['id']) if meta.get('id') else base_stem)
+    raw_id = meta.get('id') or parsed_top.get('id') or ''
+    raw_label = meta.get('label') or parsed_top.get('label') or ''
+    raw_render = (
+        meta.get('render')
+        or parsed_top.get('render')
+        or ('cursor' if parsed_top.get('schema') == 'brbr.cursor_overlay.v1' else '')
+    )
+    render = 'cursor' if raw_render == 'cursor' else ('heatmap' if raw_render == 'heatmap' else 'vector')
+
+    base_stem = _strip_overlay_ext(os.path.basename(full_file_path))
+    ov_id = id_override or (str(raw_id) if raw_id else base_stem)
     return {
         'id': ov_id,
-        'meta_id': str(meta['id']) if meta.get('id') else ov_id,
+        'meta_id': str(raw_id) if raw_id else ov_id,
         'study': study_id,
-        'label': str(meta['label']) if meta.get('label') else ov_id,
-        'render': 'heatmap' if meta.get('render') == 'heatmap' else 'vector',
+        'label': str(raw_label) if raw_label else ov_id,
+        'render': render,
         'path': rel_file,
         'url': f"{get_http_base()}/files/{encode_path_segments(rel_file)}",
         'mtime': mtime,
@@ -560,14 +581,18 @@ def resolve_cross_study_overlay(ref_str: str, root_real: str) -> dict[str, Any] 
     if not cleaned or '..' in cleaned or '\0' in cleaned:
         return None
 
+    lower = cleaned.lower()
     candidates = [cleaned]
-    if not cleaned.lower().endswith('.geojson'):
-        candidates.append(f"{cleaned}.geojson")
+    if not lower.endswith('.geojson') and not lower.endswith('.json'):
+        candidates.extend([f"{cleaned}.geojson", f"{cleaned}.json"])
         slash_idx = cleaned.find('/')
         if slash_idx > 0:
             study_part = cleaned[:slash_idx]
             rest_part = cleaned[slash_idx + 1:]
-            candidates.append(f"{study_part}/overlays/{rest_part}.geojson")
+            candidates.extend([
+                f"{study_part}/overlays/{rest_part}.geojson",
+                f"{study_part}/overlays/{rest_part}.json",
+            ])
 
     for cand in candidates:
         res = resolve_safe_study_path(cand, must_exist=True)
@@ -652,7 +677,7 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
         study_dir = study_res['fullPath']
         overlays_dir = os.path.join(study_dir, 'overlays')
 
-        overlay_files = list_files_recursive(overlays_dir, '.geojson', 4)
+        overlay_files = list_files_recursive(overlays_dir, ('.geojson', '.json'), 4)
         for fp in overlay_files:
             try:
                 real_fp = os.path.realpath(fp)
@@ -660,9 +685,7 @@ def build_manifest(query: dict[str, Any] | None = None) -> dict[str, Any]:
                 continue
             if not real_fp.startswith(root_real + os.sep) or not os.path.isfile(real_fp):
                 continue
-            rel_id = os.path.relpath(fp, overlays_dir).replace('\\', '/')
-            if rel_id.lower().endswith('.geojson'):
-                rel_id = rel_id[:-8]
+            rel_id = _strip_overlay_ext(os.path.relpath(fp, overlays_dir).replace('\\', '/'))
             desc = build_overlay_descriptor(real_fp, root_real, rel_id, requested_study)
             overlays.append(desc)
             seen_overlay_ids.add(desc['id'])

@@ -276,6 +276,19 @@ function resolveSafeStudyPath(relSubpath, { mustExist = true, allowRoot = false 
   return { ok: true, fullPath: candidate, rootReal, relPath: relNorm };
 }
 
+function stripOverlayExt(name) {
+  return String(name).replace(/\.(?:geo)?json$/i, '');
+}
+
+function matchesExtFilter(fileName, extFilter) {
+  if (!extFilter) return true;
+  const lower = fileName.toLowerCase();
+  if (Array.isArray(extFilter)) {
+    return extFilter.some((ext) => lower.endsWith(ext));
+  }
+  return lower.endsWith(extFilter);
+}
+
 function listFilesRecursive(baseDir, extFilter, maxDepth = 5) {
   const results = [];
   if (!fs.existsSync(baseDir)) return results;
@@ -294,7 +307,7 @@ function listFilesRecursive(baseDir, extFilter, maxDepth = 5) {
       if (ent.isDirectory()) {
         walk(full, depth + 1);
       } else if (ent.isFile() || ent.isSymbolicLink()) {
-        if (!extFilter || ent.name.toLowerCase().endsWith(extFilter)) {
+        if (matchesExtFilter(ent.name, extFilter)) {
           results.push(full);
         }
       }
@@ -311,7 +324,7 @@ function inspectStudyDir(studyDir, relStudyId) {
   const plotLayoutFile = path.join(studyDir, 'plot_layout.json');
   const readmeFile = path.join(studyDir, 'README.md');
 
-  const overlayFiles = listFilesRecursive(overlaysDir, '.geojson', 4);
+  const overlayFiles = listFilesRecursive(overlaysDir, ['.geojson', '.json'], 4);
   const channelFiles = listFilesRecursive(channelsDir, '.json', 4);
   const hasPlotGroups = fs.existsSync(plotGroupsFile);
   const hasPlotLayout = fs.existsSync(plotLayoutFile);
@@ -348,7 +361,7 @@ function inspectStudyDir(studyDir, relStudyId) {
 
   const overlayIds = [];
   for (const fp of overlayFiles) {
-    const rel = path.relative(overlaysDir, fp).replace(/\\/g, '/').replace(/\.geojson$/i, '');
+    const rel = stripOverlayExt(path.relative(overlaysDir, fp).replace(/\\/g, '/'));
     overlayIds.push(rel);
     try {
       const mt = fs.statSync(fp).mtimeMs / 1000;
@@ -491,20 +504,28 @@ function buildOverlayDescriptor(fullFilePath, rootReal, idOverride = '', studyId
   } catch {}
 
   let meta = {};
+  let parsed = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(fullFilePath, 'utf8'));
+    parsed = JSON.parse(fs.readFileSync(fullFilePath, 'utf8'));
     if (parsed && typeof parsed.metadata === 'object' && parsed.metadata !== null) {
       meta = parsed.metadata;
     }
   } catch {}
 
-  const id = idOverride || (meta.id ? String(meta.id) : path.basename(fullFilePath).replace(/\.geojson$/i, ''));
+  const rawId = meta.id || (parsed && parsed.id) || '';
+  const rawLabel = meta.label || (parsed && parsed.label) || '';
+  const rawRender = meta.render ||
+    (parsed && parsed.render) ||
+    (parsed && parsed.schema === 'brbr.cursor_overlay.v1' ? 'cursor' : '');
+  const render = rawRender === 'cursor' ? 'cursor' : (rawRender === 'heatmap' ? 'heatmap' : 'vector');
+
+  const id = idOverride || (rawId ? String(rawId) : stripOverlayExt(path.basename(fullFilePath)));
   return {
     id,
-    meta_id: meta.id ? String(meta.id) : id,
+    meta_id: rawId ? String(rawId) : id,
     study: studyId,
-    label: meta.label ? String(meta.label) : id,
-    render: meta.render === 'heatmap' ? 'heatmap' : 'vector',
+    label: rawLabel ? String(rawLabel) : id,
+    render,
     path: relFile,
     url: `${getHttpBase()}/files/${encodePathSegments(relFile)}`,
     mtime,
@@ -516,14 +537,15 @@ function resolveCrossStudyOverlay(refStr, rootReal) {
   const cleaned = String(refStr).trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (!cleaned || cleaned.includes('..') || cleaned.includes('\0')) return null;
 
+  const lower = cleaned.toLowerCase();
   const candidates = [cleaned];
-  if (!cleaned.toLowerCase().endsWith('.geojson')) {
-    candidates.push(`${cleaned}.geojson`);
+  if (!lower.endsWith('.geojson') && !lower.endsWith('.json')) {
+    candidates.push(`${cleaned}.geojson`, `${cleaned}.json`);
     const slashIdx = cleaned.indexOf('/');
     if (slashIdx > 0) {
       const studyPart = cleaned.slice(0, slashIdx);
       const restPart = cleaned.slice(slashIdx + 1);
-      candidates.push(`${studyPart}/overlays/${restPart}.geojson`);
+      candidates.push(`${studyPart}/overlays/${restPart}.geojson`, `${studyPart}/overlays/${restPart}.json`);
     }
   }
 
@@ -614,7 +636,7 @@ function buildManifest(query = {}) {
     const studyDir = studyRes.fullPath;
     const overlaysDir = path.join(studyDir, 'overlays');
 
-    const overlayFiles = listFilesRecursive(overlaysDir, '.geojson', 4);
+    const overlayFiles = listFilesRecursive(overlaysDir, ['.geojson', '.json'], 4);
     for (const fp of overlayFiles) {
       let realFp;
       try {
@@ -623,7 +645,7 @@ function buildManifest(query = {}) {
         continue;
       }
       if (!realFp.startsWith(rootReal + path.sep)) continue;
-      const relId = path.relative(overlaysDir, fp).replace(/\\/g, '/').replace(/\.geojson$/i, '');
+      const relId = stripOverlayExt(path.relative(overlaysDir, fp).replace(/\\/g, '/'));
       const desc = buildOverlayDescriptor(realFp, rootReal, relId, requestedStudy);
       overlays.push(desc);
       seenOverlayIds.add(desc.id);
