@@ -39,19 +39,14 @@ git clone https://github.com/kibergus/brbrdb-antigravity-plugin.git ~/.gemini/co
 
 *(If the directory already exists, run `git -C ~/.gemini/config/plugins/brbrtelemetry pull --ff-only` to update it.)*
 
-### Step 2: Configure the `telemetry` MCP Server
-In addition to the bundled local `companion` MCP server (which activates automatically with the plugin), add the remote `telemetry` server to `~/.gemini/config/mcp_config.json` using your BrBrDb authentication key (if you are an AI agent running this setup, ask the user for their key first):
+### Step 2: Configure the `telemetry` MCP Server (Streamable HTTP)
+In addition to the bundled local `companion` MCP server (which activates automatically with the plugin), add the remote `telemetry` server to `~/.gemini/config/mcp_config.json` over native Streamable HTTP using your BrBrDb authentication key (if you are an AI agent running this setup, ask the user for their key first, and merge `"telemetry"` into any existing `"mcpServers"` object rather than overwriting other servers):
 
 ```json
 {
   "mcpServers": {
     "telemetry": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://brbrdb.brbrkitten.com/api/mcp?key=<API_KEY>"
-      ]
+      "url": "https://brbrdb.brbrkitten.com/api/mcp?key=<API_KEY>"
     }
   }
 }
