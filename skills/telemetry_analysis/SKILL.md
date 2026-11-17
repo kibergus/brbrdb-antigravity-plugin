@@ -54,9 +54,17 @@ Store generated GeoJSON overlays, derived channels, and analysis scripts under `
 
 ---
 
-## 3. Interactive In-Text Pill Commentary (`<agent-embed>`)
+## 3. Interactive In-Text Pill Commentary (`<agent-embed>` & Reports)
 
-Format key spatial evidence (braking points, apexes, sensor events, overlay toggles) as clickable inline pills using Antigravity's **Generative UI (`<agent-embed>`)** workflow.
+Your commentary and the **BrBrDb Telemetry** viewer work together as a unified workspace: every analytical response—whether delivered in chat via `<agent-embed>` or published as an HTML report via `save_report`—must let the user **click any claim to immediately inspect, verify, and understand the evidence** on the synchronized track map and plots.
+
+**Mandatory Pill Coverage** (applies equally to `<agent-embed>` widgets and published HTML reports):
+- Make **all** concrete telemetry references clickable inline pills:
+  - **Distances & track events**: Every meter mark (`316.5m`), braking/deceleration point, turn-in, apex (`338.0m (Apex)`), and throttle-pickup / exit point.
+  - **Corners / Turns**: Every turn mention (`Turn 3`) with `turn` (1-indexed) and `focusRange`.
+  - **Laps**: Every compared lap mention (`Lap 6 (Benchmark)`, `Lap 5`) with `lapsA` / `lapsB` so the user can switch or highlight laps directly.
+  - **Channel events & overlays**: Notable trace features (e.g., speed drops, Delta T inflections, steering/pedal events, or any logged auxiliary sensor events) and map overlay toggles (`overlays: [...]`).
+- **Purpose-Driven Inline Triggers**: Embed pills naturally inline inside the sentence where the claim is made. **Do NOT** create generic, disconnected button bars hanging in the air (e.g., standalone "Show Steering" toolbars); every pill must serve the specific observation being explained.
 
 > [!IMPORTANT]
 > **NEVER output ` ```html ... ``` ` blocks directly in chat** (they render as literal code, not buttons). Always:
@@ -72,14 +80,33 @@ Format key spatial evidence (braking points, apexes, sensor events, overlay togg
 </head>
 <body class="bg-transparent text-[var(--foreground)] antialiased m-0 p-0 font-sans">
   <p class="text-sm leading-relaxed text-[var(--foreground)] m-0">
-    Benchmark Lap 6 brakes at
-    <button onclick="trigger({ dist: 316.5, plots: ['speed', 'pedals'], focusRange: [290, 380], overlays: ['braking_zones'] })"
+    Comparing
+    <button onclick="trigger({ lapsA: ['18_09_practice-6', '18_09_practice-5'], turn: 3, focusRange: [290, 400], plots: ['speed', 'pedals'] })"
+      class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-emerald-500/15 text-emerald-400 font-mono text-xs font-medium border border-emerald-500/30 hover:bg-emerald-500/25 active:scale-95 transition-all cursor-pointer">
+      Lap 6 vs Lap 5
+    </button>
+    through
+    <button onclick="trigger({ turn: 3, focusRange: [290, 400], plots: ['speed', 'pedals'] })"
+      class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-violet-500/15 text-violet-400 font-mono text-xs font-medium border border-violet-500/30 hover:bg-violet-500/25 active:scale-95 transition-all cursor-pointer">
+      Turn 3
+    </button>:
+    Benchmark Lap 6 brakes smoothly at
+    <button onclick="trigger({ dist: 316.5, plots: ['speed', 'delta'], focusRange: [290, 380] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-sky-500/15 text-sky-400 font-mono text-xs font-medium border border-sky-500/30 hover:bg-sky-500/25 active:scale-95 transition-all cursor-pointer">
       316.5m
     </button>, whereas Lap 5 brakes late at
-    <button onclick="trigger({ dist: 319.5, turn: 3, plots: ['speed', 'eeg_bands'], overlays: ['theta_heatmap'] })"
+    <button onclick="trigger({ dist: 319.5, turn: 3, plots: ['speed', 'delta'], focusRange: [290, 380] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-rose-500/15 text-rose-400 font-mono text-xs font-medium border border-rose-500/30 hover:bg-rose-500/25 active:scale-95 transition-all cursor-pointer">
-      319.5m (Turn 3)
+      319.5m
+    </button>
+    and scrubs speed at the
+    <button onclick="trigger({ dist: 338.0, turn: 3, plots: ['speed', 'steering'], focusRange: [315, 365] })"
+      class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-amber-500/15 text-amber-400 font-mono text-xs font-medium border border-amber-500/30 hover:bg-amber-500/25 active:scale-95 transition-all cursor-pointer">
+      338.0m (Apex)
+    </button>, delaying full gas until
+    <button onclick="trigger({ dist: 357.0, turn: 3, plots: ['speed', 'pedals'], focusRange: [335, 405] })"
+      class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-sky-500/15 text-sky-400 font-mono text-xs font-medium border border-sky-500/30 hover:bg-sky-500/25 active:scale-95 transition-all cursor-pointer">
+      357.0m
     </button>.
     <span id="pill-ack" class="text-xs font-mono text-emerald-400 ml-1.5"></span>
   </p>
@@ -109,29 +136,39 @@ Format key spatial evidence (braking points, apexes, sensor events, overlay togg
 
 ---
 
-## 4. Telemetry Analysis Methodology
+## 4. Telemetry Analysis Methodology (Strictly Data-Driven)
+
+Every finding, diagnosis, and coaching takeaway **MUST be grounded in measured telemetry evidence**—always cite the exact channel, numbers, and meter marks, and **explain *how* and *why* that evidence supports your conclusion** so the driver can verify it in the viewer.
 
 1. **Channel Audit & Grounded Evidence**:
-   - Inspect recorded channels via `list_sessions` / `get_telemetry_data` (`Speed`, `accel`, GPS `Latitude`/`Longitude`, `Steering Angle`, `Throttle`, `Brake`, `EEG`/`ECG`/`EMG`, etc.). Do not search outside `<workspace>/studies/` for server logs/DBs.
-   - **Reconstructed 3D Gaze Channels** (computed when driving camera pose `Local Cam Quat` / `Cam Quat` in `NED + FRD` and `tobii_gaze` `Gaze X`/`Gaze Y` are logged):
+   - Inspect recorded channels via `list_sessions` / `get_telemetry_data` (core channels like `Speed`, `accel`, GPS `Latitude`/`Longitude`, plus any optional driver-input or auxiliary channels if logged, such as `Steering Angle`, `Throttle`, `Brake`, or physiological/gaze streams). Do not search outside `<workspace>/studies/` for server logs/DBs.
+   - **Calibrate Confidence Strictly to Logged Sensors** (never assert unmeasured driver actions as fact):
+     - **Direct Evidence (High Confidence)**: Directly measured in recorded traces (`Speed`, `Delta Time`, GPS line width/radius, or any logged pedals/steering/auxiliary sensors). *Example: "Speed drops 4.2 km/h lower at the 338m apex, adding +0.14s on Delta T."*
+     - **Inferred (Medium Confidence)**: Derived from surrogate channels when a primary sensor is absent (e.g., longitudinal `accel` showing positive drive starts 6m later when `Throttle` is unlogged). Always name the supporting channel.
+     - **Hypothesis (Low–Medium Confidence)**: Unmeasured driver actions (e.g., guessing steering snap or brake lock when steering/brake sensors are absent). State explicitly as a hypothesis and note which sensor is missing.
+   - **Optional Reconstructed 3D Gaze Channels** (only when `Local Cam Quat` / `Cam Quat` in `NED + FRD` and `tobii_gaze` `Gaze X`/`Gaze Y` are logged):
      - `Gaze Heading` (`deg` `[0, 360)` compass bearing clockwise from North), `Gaze Yaw Offset` (`deg` `[-180, +180)` relative to `Kart Heading`: `+` = looking right of kart nose, `-` = looking left), and `Gaze Pitch` (`deg` relative to world horizon: `+` = looking up, `-` = looking down). Eye blinks and TV-camera cuts produce `null`/`NaN` gaps—report gaps honestly rather than interpolating across them.
      - Visually sync with `plots=["speed", "gaze"]` (stacked `Gaze Yaw Offset` + `Gaze Pitch` plot showing saccade/fixation switches) and `overlays=["gaze_sightline"]` (fixed-length `60 m` map sightline ray, viewing cone, and `{Gaze Yaw Offset:+.0f}°` badge). Look for when gaze switches from braking reference -> turn-in apex -> exit horizon (earlier apex-to-exit switch correlates with confident throttle pickup).
-   - Calibrate confidence strictly to logged sensors:
-     - **Direct Evidence (High)**: Measured traces (`Speed`, `Delta T`, GPS line, logged sensors).
-     - **Inferred (Medium)**: Surrogates (e.g. longitudinal `accel` when pedals are unlogged).
-     - **Hypothesis (Low–Medium)**: Unmeasured driver inputs (state explicitly as a hypothesis).
-2. **Corner Benchmark Rule**:
+2. **Corner Benchmark & Target Lap Selection**:
    - For any specific corner `N`, select the benchmark reference lap by the fastest **corner segment time** (`turn_time_s` from `get_stats(..., turn_index=N)`), **never** full-lap time.
+   - Pick a representative median target lap or one with a clear ~0.2s–0.5s delta to diagnose the root cause of time loss.
 3. **Viewer Readability Limits**:
    - Compare **at most 2 laps** at once (1 Benchmark vs. 1 Target).
    - Show **at most 2–3 bottom plots** simultaneously so the track map stays visible (even if a study registers more tabs in the bottom bar).
-4. **Corner Investigation (Sub-Agents for Multi-Turn Reports)**:
-   - Delegate per-corner deep dives (`start_m` to `end_m`) using [subagent_prompt.md](references/subagent_prompt.md), comparing entry, min-apex, corner-exit, and straight-exit speeds (`km/h` exclusively) plus **Delta T inflection** (where time loss begins: entry, apex, or exit).
-   - Keep coaching takeaways positive, specific, and accessible for junior drivers (~11 years old).
+4. **Delta T Inflection & Causation Chain (Sub-Agents for Multi-Turn Reports)**:
+   - Delegate per-corner deep dives (`start_m` to `end_m`) using [subagent_prompt.md](references/subagent_prompt.md).
+   - Pinpoint the exact meter marks where **Delta T** starts to climb (entry, apex, or exit) and build a clear causation chain: **Driver Control / Line Choice → Kart Dynamics → Speed Deficit (`km/h` exclusively) → Time Delta (`s`)**, checking braking/deceleration, apex V-min & steering/line arc, and throttle/acceleration pickup.
+5. **Communication Style (Simple Language for ~11-Year-Olds)**:
+   - Write in **simple, friendly, encouraging language** that an 11-year-old junior kart driver can easily understand and picture in their helmet—no stiff corporate jargon (use *"The Big Picture"* or *"Where We Can Find Time"* instead of *"Executive Summary"*).
+   - Frame mistakes positively as exciting ways to unlock faster laps (e.g., *"You can find +0.2s here just by letting the kart roll a bit freer through the middle!"*).
+   - Use relatable karting feel (*"getting back on the gas"*, *"carrying rolling speed"*, *"scrubbing speed with too much wheel"*, *"opening up the steering on exit"*), use **`km/h` exclusively** ($v_{\text{km/h}} = v_{\text{m/s}} \times 3.6$), and end with 1–2 punchy, visual track cues.
 
 ---
 
 ## 5. Report Publishing Policy (`save_report` / `edit_report`)
 
-- **Local by Default**: Deliver commentary, `<agent-embed>` pills, and `<workspace>/studies/` files locally—**never** call `save_report` or `edit_report` unless the user explicitly asks to publish/save to the website (when requested, format using [report_template.html](references/report_template.html)).
+- **Local by Default**: Deliver commentary, `<agent-embed>` pills, and `<workspace>/studies/` files locally—**never** call `save_report` or `edit_report` unless the user explicitly asks to publish/save to the website.
+- **Same Rules for Published Reports**: When publishing a report with `save_report` / `edit_report` (formatted via [report_template.html](references/report_template.html)), apply the **exact same rules** as `<agent-embed>` commentary:
+  - Make all distances, braking/throttle points, apexes, turns, and compared laps clickable inline `<button class="telemetry-jump-btn" data-...>` pills (purpose-driven, inline in the text—no disconnected button bars).
+  - Follow the same **Strictly Data-Driven** evidence/confidence rules and **Simple Language for ~11-Year-Olds** coaching tone.
 - **Graceful `PermissionError` Handling**: If `save_report` fails with `PermissionError` (`manage_reports` permission required), do not treat it as a failure; inform the user that server publishing requires elevated permissions and confirm all local studies and viewer controls remain active.
