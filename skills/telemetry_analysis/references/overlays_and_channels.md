@@ -89,7 +89,9 @@ For interactive cursor-linked vectors on the Google Map (e.g. reconstructed driv
 ## 2. Custom Derived Channels (`channels/<name>.json`)
 
 1. **Fetch Recorded Samples**:
-   Call `get_telemetry_data(session_id=..., track=..., date=..., channels=["Time", "Lap", "Lap Distance", "Speed", "EEG", ...])` on the `telemetry` MCP server (there is no `raw_aux_stream` argument—request channel names directly via `channels`).
+   Check `aux_streams` in the `list_sessions` response first. If the channel you need belongs to an auxiliary stream (e.g., `"spikerbit"` for 500 Hz `EEG`, `"tobii_gaze"`, `"tobii_face"`), pass `raw_aux_stream="<stream>"` to `get_telemetry_data(...)` so you receive native-rate samples instead of the 100 Hz resampled primary timeline (`Lap` and `Lap Distance` are automatically interpolated onto the auxiliary timestamps):
+   `get_telemetry_data(session_id=..., track=..., date=..., raw_aux_stream="spikerbit", channels=["EEG"])`
+   Otherwise, omit `raw_aux_stream` to fetch primary/derived channels on the ~100 Hz timeline.
    - Always inspect the returned `sample_rate_hz` (or `Time` step) dynamically instead of assuming a fixed sample rate, and keep any digital filter cutoff strictly below `sample_rate_hz / 2` (Nyquist).
 2. **Write `brbr.custom_channel.v1` JSON** to `<workspace>/studies/<study_id>/channels/<name>.json`:
 
