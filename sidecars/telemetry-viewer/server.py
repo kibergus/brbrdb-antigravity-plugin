@@ -1206,7 +1206,10 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 'zoom': {'type': 'number', 'description': 'Google Maps zoom level.'},
                 'turn': {
                     'type': 'integer',
-                    'description': '1-indexed turn number to select and focus (e.g. 1 for Turn 1).',
+                    'description': (
+                        '0-indexed turn index into get_track_info()["turns"] '
+                        'to select and focus (e.g. 0 for the first turn).'
+                    ),
                 },
                 'trajectory_color': {
                     'type': 'string',
@@ -1427,7 +1430,6 @@ async def dispatch_action_payload(raw_args: dict[str, Any]) -> dict[str, Any]:
     if 'zoom' in raw_args and raw_args['zoom'] is not None:
         payload['zoom'] = raw_args['zoom']
     if 'turn' in raw_args and raw_args['turn'] is not None:
-        payload['turnNumber'] = int(raw_args['turn'])
         payload['turn'] = int(raw_args['turn'])
     if 'plots' in raw_args and raw_args['plots'] is not None:
         payload['plots'] = raw_args['plots']
@@ -2012,10 +2014,8 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
                         else:
                             active_overlays.append(t_id)
                         payload['toggleOverlay'] = t_id
-                    if payload.get('turn') is not None and payload.get('turnNumber') is None:
-                        payload['turnNumber'] = int(payload['turn'])
-                    elif payload.get('turnNumber') is not None and payload.get('turn') is None:
-                        payload['turn'] = int(payload['turnNumber'])
+                    if payload.get('turn') is not None:
+                        payload['turn'] = int(payload['turn'])
                     save_persisted_state()
                     if not payload.get('type'):
                         payload['type'] = 'telemetry_jump'

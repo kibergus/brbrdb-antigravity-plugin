@@ -1125,7 +1125,7 @@ const MCP_TOOLS = [
         zoom: { type: 'number', description: 'Google Maps zoom level.' },
         turn: {
           type: 'integer',
-          description: '1-indexed turn number to select and focus (e.g. 1 for Turn 1).',
+          description: '0-indexed turn index into get_track_info()["turns"] to select and focus (e.g. 0 for the first turn).',
         },
         trajectory_color: {
           type: 'string',
@@ -1314,7 +1314,6 @@ function dispatchActionPayload(rawArgs) {
   if (rawArgs.lng !== undefined) payload.lng = rawArgs.lng;
   if (rawArgs.zoom !== undefined) payload.zoom = rawArgs.zoom;
   if (rawArgs.turn !== undefined && rawArgs.turn !== null) {
-    payload.turnNumber = Number(rawArgs.turn);
     payload.turn = Number(rawArgs.turn);
   }
   if (rawArgs.plots !== undefined) payload.plots = rawArgs.plots;
@@ -1819,10 +1818,8 @@ function createHttpHandler() {
             else activeOverlays.push(tId);
             payload.toggleOverlay = tId;
           }
-          if (payload.turn !== undefined && payload.turn !== null && payload.turnNumber === undefined) {
-            payload.turnNumber = Number(payload.turn);
-          } else if (payload.turnNumber !== undefined && payload.turnNumber !== null && payload.turn === undefined) {
-            payload.turn = Number(payload.turnNumber);
+          if (payload.turn !== undefined && payload.turn !== null) {
+            payload.turn = Number(payload.turn);
           }
           savePersistedState();
           if (!payload.type) payload.type = 'telemetry_jump';

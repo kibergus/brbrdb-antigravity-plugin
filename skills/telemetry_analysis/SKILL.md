@@ -61,7 +61,7 @@ Your commentary and the **BrBrDb Telemetry** viewer work together as a unified w
 **Mandatory Pill Coverage** (applies equally to `<agent-embed>` widgets and published HTML reports):
 - Make **all** concrete telemetry references clickable inline pills:
   - **Distances & track events**: Every meter mark (`316.5m`), braking/deceleration point, turn-in, apex (`338.0m (Apex)`), and throttle-pickup / exit point.
-  - **Corners / Turns**: Every turn mention (`Turn 3`) with `turn` (1-indexed) and `focusRange`.
+  - **Corners / Turns**: Every turn mention (`Turn 3`) with `turn` (0-indexed, matching `get_track_info()['turns']`) and `focusRange`.
   - **Laps**: Every compared lap mention (`Lap 6 (Benchmark)`, `Lap 5`) with `lapsA` / `lapsB` so the user can switch or highlight laps directly.
   - **Channel events & overlays**: Notable trace features (e.g., speed drops, Delta T inflections, steering/pedal events, or any logged auxiliary sensor events) and map overlay toggles (`overlays: [...]`).
 - **Purpose-Driven Inline Triggers**: Embed pills naturally inline inside the sentence where the claim is made. **Do NOT** create generic, disconnected button bars hanging in the air (e.g., standalone "Show Steering" toolbars); every pill must serve the specific observation being explained.
@@ -81,12 +81,12 @@ Your commentary and the **BrBrDb Telemetry** viewer work together as a unified w
 <body class="bg-transparent text-[var(--foreground)] antialiased m-0 p-0 font-sans">
   <p class="text-sm leading-relaxed text-[var(--foreground)] m-0">
     Comparing
-    <button onclick="trigger({ lapsA: ['18_09_practice-6', '18_09_practice-5'], turn: 3, focusRange: [290, 400], plots: ['speed', 'pedals'] })"
+    <button onclick="trigger({ lapsA: ['18_09_practice-6', '18_09_practice-5'], turn: 2, focusRange: [290, 400], plots: ['speed', 'pedals'] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-emerald-500/15 text-emerald-400 font-mono text-xs font-medium border border-emerald-500/30 hover:bg-emerald-500/25 active:scale-95 transition-all cursor-pointer">
       Lap 6 vs Lap 5
     </button>
     through
-    <button onclick="trigger({ turn: 3, focusRange: [290, 400], plots: ['speed', 'pedals'] })"
+    <button onclick="trigger({ turn: 2, focusRange: [290, 400], plots: ['speed', 'pedals'] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-violet-500/15 text-violet-400 font-mono text-xs font-medium border border-violet-500/30 hover:bg-violet-500/25 active:scale-95 transition-all cursor-pointer">
       Turn 3
     </button>:
@@ -95,16 +95,16 @@ Your commentary and the **BrBrDb Telemetry** viewer work together as a unified w
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-sky-500/15 text-sky-400 font-mono text-xs font-medium border border-sky-500/30 hover:bg-sky-500/25 active:scale-95 transition-all cursor-pointer">
       316.5m
     </button>, whereas Lap 5 brakes late at
-    <button onclick="trigger({ dist: 319.5, turn: 3, plots: ['speed', 'delta'], focusRange: [290, 380] })"
+    <button onclick="trigger({ dist: 319.5, turn: 2, plots: ['speed', 'delta'], focusRange: [290, 380] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-rose-500/15 text-rose-400 font-mono text-xs font-medium border border-rose-500/30 hover:bg-rose-500/25 active:scale-95 transition-all cursor-pointer">
       319.5m
     </button>
     and scrubs speed at the
-    <button onclick="trigger({ dist: 338.0, turn: 3, plots: ['speed', 'steering'], focusRange: [315, 365] })"
+    <button onclick="trigger({ dist: 338.0, turn: 2, plots: ['speed', 'steering'], focusRange: [315, 365] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-amber-500/15 text-amber-400 font-mono text-xs font-medium border border-amber-500/30 hover:bg-amber-500/25 active:scale-95 transition-all cursor-pointer">
       338.0m (Apex)
     </button>, delaying full gas until
-    <button onclick="trigger({ dist: 357.0, turn: 3, plots: ['speed', 'pedals'], focusRange: [335, 405] })"
+    <button onclick="trigger({ dist: 357.0, turn: 2, plots: ['speed', 'pedals'], focusRange: [335, 405] })"
       class="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-sky-500/15 text-sky-400 font-mono text-xs font-medium border border-sky-500/30 hover:bg-sky-500/25 active:scale-95 transition-all cursor-pointer">
       357.0m
     </button>.
@@ -130,7 +130,7 @@ Your commentary and the **BrBrDb Telemetry** viewer work together as a unified w
 
 ### `/api/action` Payload Keys (camelCase equivalents of `set_telemetry_view`)
 - **Session & Laps**: `url` / `sessionUrl` (relative or full `/telemetry/...` URL), `lapsA` / `lapsB` (array of `<session_stem>-<lap>`), `tab` (`"map" | "stats"`), `rtab` (`"cornering" | "acceleration" | "slip_angle" | "report"`).
-- **Cursor & Framing**: `dist` (meters), `turn` / `turnNumber` (**both 1-indexed**, e.g. `1` = Turn 1), `focusRange` (`[min, max]` sets both map & X-axis), `xlim` (`[min, max]` plot only), `mapRange` (`[min, max]` map only).
+- **Cursor & Framing**: `dist` (meters), `turn` (**0-indexed**, e.g. `0` = first turn in `get_track_info()['turns']`, `2` = Turn 3), `focusRange` (`[min, max]` sets both map & X-axis), `xlim` (`[min, max]` plot only), `mapRange` (`[min, max]` map only).
 - **Plots & Study Layers**: `plots` (array of visible plot IDs, e.g. `["speed", "delta", "gaze"]`), `openPlot` / `togglePlot` (string), `study` (string), `overlays` (array, e.g. `["gaze_sightline"]`, `[]` clears all), `toggleOverlay` (string).
 - **Map Styling**: `tcol` (`"pedals" | "speed" | "group" | "sector" | "none"`), `mapType` (`"satellite" | "kartsim" | "hybrid"`).
 
@@ -150,7 +150,7 @@ Every finding, diagnosis, and coaching takeaway **MUST be grounded in measured t
      - `Gaze Heading` (`deg` `[0, 360)` compass bearing clockwise from North), `Gaze Yaw Offset` (`deg` `[-180, +180)` relative to `Kart Heading`: `+` = looking right of kart nose, `-` = looking left), and `Gaze Pitch` (`deg` relative to world horizon: `+` = looking up, `-` = looking down). Eye blinks and TV-camera cuts produce `null`/`NaN` gaps—report gaps honestly rather than interpolating across them.
      - Visually sync with `plots=["speed", "gaze"]` (stacked `Gaze Yaw Offset` + `Gaze Pitch` plot showing saccade/fixation switches) and `overlays=["gaze_sightline"]` (fixed-length `60 m` map sightline ray, viewing cone, and `{Gaze Yaw Offset:+.0f}°` badge). Look for when gaze switches from braking reference -> turn-in apex -> exit horizon (earlier apex-to-exit switch correlates with confident throttle pickup).
 2. **Corner Benchmark & Target Lap Selection**:
-   - For any specific corner `N`, select the benchmark reference lap by the fastest **corner segment time** (`turn_time_s` from `get_stats(..., turn_index=N)`), **never** full-lap time.
+   - For any specific corner `turn_index` (0-indexed from `get_track_info()['turns']` / `get_pace_summary()['turns']`), select the benchmark reference lap by the fastest **corner segment time** (`time_s` from `get_stats(..., turn_index=idx)`), **never** full-lap time.
    - Pick a representative median target lap or one with a clear ~0.2s–0.5s delta to diagnose the root cause of time loss.
 3. **Viewer Readability Limits**:
    - Compare **at most 2 laps** at once (1 Benchmark vs. 1 Target).

@@ -5,7 +5,7 @@ When analyzing a specific corner (Turn N), launch a dedicated sub-agent with the
 ## Sub-Agent Task Template
 
 ```markdown
-You are a specialized Telemetry Coaching Sub-Agent investigating Turn {TURN_NAME} (Turn Index: {TURN_INDEX}).
+You are a specialized Telemetry Coaching Sub-Agent investigating Turn {TURN_NAME} (0-indexed Turn Index: {TURN_INDEX} into `get_track_info()['turns']`).
 Your mission is to analyze driver telemetry exclusively for this corner to determine why time was lost compared to optimal execution, establish a data-grounded causation chain with calibrated confidence, and produce an interactive commentary report snippet that links directly to telemetry viewer events.
 
 ### Scope & Parameters
@@ -14,7 +14,7 @@ Your mission is to analyze driver telemetry exclusively for this corner to deter
 - Session ID: {SESSION_ID}
 - Driver: {DRIVER_NAME}
 - Turn Name: Turn {TURN_NAME}
-- Turn Index: {TURN_INDEX}
+- Turn Index: {TURN_INDEX} (0-indexed into `get_track_info()['turns']`)
 - Distance Range: {START_M}m to {END_M}m (Apexes at {APEXES_M}m)
 - Comparison Laps (Keep under 3 laps to preserve readability):
   - Benchmark Reference Lap: Lap {FASTEST_LAP} ({FASTEST_TURN_TIME}s)
@@ -22,7 +22,7 @@ Your mission is to analyze driver telemetry exclusively for this corner to deter
 
 ### Required Workflow:
 1. **Analyze Turn Stats & Audit Available Channels**:
-   - Call `get_stats(track="{TRACK_NAME}", date="{DATE}", session_id="{SESSION_ID}", turn_index={TURN_INDEX})`. Compare turn time, entry speed, minimum apex speed, exit speed, straight exit speed, and maximum steering angle (if recorded) between the benchmark lap and target lap.
+   - Call `get_stats(track="{TRACK_NAME}", date="{DATE}", session_id="{SESSION_ID}", turn_index={TURN_INDEX})` (where `turn_index` is 0-indexed). Compare turn time, entry speed, minimum apex speed, exit speed, straight exit speed, and maximum steering angle (if recorded) between the benchmark lap and target lap.
    - Note which channels are physically present in the session (e.g. Speed + GPS + Accel only vs full sensor telemetry with Steering/Throttle/Brake).
 
 2. **Visual Inspection (Keep Plotted Laps Under 3)**:
