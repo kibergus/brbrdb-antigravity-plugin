@@ -11,11 +11,13 @@
     "turn": {{ initial_turn_idx }},
     "lapsA": ["{{ benchmark_lap_id }}", "{{ target_lap_id }}"],
     "visA": true,
+    "focusRange": [{{ initial_start_m }}, {{ initial_end_m }}],
+    "mapRange": [{{ initial_start_m }}, {{ initial_end_m }}],
     "xlim": [{{ initial_start_m }}, {{ initial_end_m }}],
     "dist": {{ initial_dist_m }},
     "delta": true,
     "speed": true,
-    "plot": {{ initial_plots_json }},
+    "plot": {{ initial_extra_plots_json }},
     "tcol": "pedals",
     "rtab": "report",
     "sidePanelWidth": 420
@@ -25,33 +27,77 @@
 <!--
 Prompt / Generation Context:
 Note: initial_turn_idx is 0-indexed into get_track_info()['turns'] (0 = first turn).
+Always include focusRange, mapRange, and xlim in state so both map bounds and bottom plots frame the primary segment on load.
+Adapt sections and components (.report-stats-grid, .evidence-tag) to fit the scope of the request; if publishing an existing chat response, preserve its structure and wording cleanly. Use <h3> for major section headings (renders in light-blue header font), and embed semantic .pill-* buttons inline inside sentences with data-focus-range="start,end".
 {{ prompt_or_generation_instructions }}
 -->
 
 <div class="report-content">
+  <style>
+    .report-content .telemetry-jump-btn.pill-turn {
+      background: rgba(139, 92, 246, 0.16) !important;
+      color: #c4b5fd !important;
+      border-color: rgba(139, 92, 246, 0.38) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-turn:hover {
+      background: rgba(139, 92, 246, 0.28) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-good {
+      background: rgba(16, 185, 129, 0.16) !important;
+      color: #6ee7b7 !important;
+      border-color: rgba(16, 185, 129, 0.38) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-good:hover {
+      background: rgba(16, 185, 129, 0.28) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-brake {
+      background: rgba(14, 165, 233, 0.16) !important;
+      color: #7dd3fc !important;
+      border-color: rgba(14, 165, 233, 0.38) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-brake:hover {
+      background: rgba(14, 165, 233, 0.28) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-apex {
+      background: rgba(245, 158, 11, 0.16) !important;
+      color: #fcd34d !important;
+      border-color: rgba(245, 158, 11, 0.38) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-apex:hover {
+      background: rgba(245, 158, 11, 0.28) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-gaze {
+      background: rgba(6, 182, 212, 0.16) !important;
+      color: #67e8f9 !important;
+      border-color: rgba(6, 182, 212, 0.38) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-gaze:hover {
+      background: rgba(6, 182, 212, 0.28) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-bad {
+      background: rgba(244, 63, 94, 0.16) !important;
+      color: #fda4af !important;
+      border-color: rgba(244, 63, 94, 0.38) !important;
+    }
+    .report-content .telemetry-jump-btn.pill-bad:hover {
+      background: rgba(244, 63, 94, 0.28) !important;
+    }
+  </style>
+
   <div>
     <h2>{{ report_heading }}</h2>
     <p>
-      Comparing Benchmark 
-      <button class="telemetry-jump-btn" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-dist="{{ benchmark_braking_m }}">
-        Lap {{ benchmark_lap_num }} ({{ benchmark_lap_time }})
-      </button> 
-      vs Target Comparison 
-      <button class="telemetry-jump-btn" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-dist="{{ target_braking_m }}">
-        Lap {{ target_lap_num }} ({{ target_lap_time }})
-      </button>.
-    </p>
-
-    <!-- Contextual view button tied to corner overview -->
-    <p style="margin-top: 6px;">
-      <button class="telemetry-jump-btn" data-focus-range="{{ turn_start_m }},{{ turn_end_m }}" data-plots="speed,delta">
-        Focus Entire Turn ({{ turn_start_m }}m–{{ turn_end_m }}m)
-      </button>
+      Comparing Benchmark
+      <button class="telemetry-jump-btn pill-good" style="background:rgba(16,185,129,0.16);color:#6ee7b7;border-color:rgba(16,185,129,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ turn_start_m }},{{ turn_end_m }}" data-dist="{{ benchmark_braking_m }}" data-plots="speed,delta,pedals">Lap {{ benchmark_lap_num }} ({{ benchmark_turn_time }})</button>
+      vs Target Comparison
+      <button class="telemetry-jump-btn pill-bad" style="background:rgba(244,63,94,0.16);color:#fda4af;border-color:rgba(244,63,94,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ turn_start_m }},{{ turn_end_m }}" data-dist="{{ target_braking_m }}" data-plots="speed,delta,pedals">Lap {{ target_lap_num }} ({{ target_turn_time }})</button>
+      through
+      <button class="telemetry-jump-btn pill-turn" style="background:rgba(139,92,246,0.16);color:#c4b5fd;border-color:rgba(139,92,246,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-turn="{{ initial_turn_idx }}" data-focus-range="{{ turn_start_m }},{{ turn_end_m }}" data-plots="speed,delta">{{ turn_label }}</button>.
     </p>
   </div>
 
   <div>
-    <h3>1. The Big Picture & Pace Check</h3>
+    <h3>1. The Big Picture &amp; Pace Check</h3>
     <p>
       {{ summary_text }}
     </p>
@@ -76,36 +122,28 @@ Note: initial_turn_idx is 0-indexed into get_track_info()['turns'] (0 = first tu
   </div>
 
   <div>
-    <h3>2. Causation Chain & Evidence</h3>
+    <h3>2. Causation Chain &amp; Evidence</h3>
     <ul>
       <li>
         <span class="evidence-tag evidence-high">Direct Evidence</span>
-        <strong>Braking Point:</strong> On Benchmark Lap {{ benchmark_lap_num }}, braking begins at 
-        <button class="telemetry-jump-btn" data-dist="{{ benchmark_braking_m }}" data-xlim="{{ braking_xlim }}">
-          {{ benchmark_braking_m }}m
-        </button>. On Lap {{ target_lap_num }}, braking is initiated at 
-        <button class="telemetry-jump-btn" data-dist="{{ target_braking_m }}" data-xlim="{{ braking_xlim }}">
-          {{ target_braking_m }}m
-        </button>.
+        <strong>Braking Point:</strong> On Benchmark Lap {{ benchmark_lap_num }}, braking begins smoothly at
+        <button class="telemetry-jump-btn pill-brake" style="background:rgba(14,165,233,0.16);color:#7dd3fc;border-color:rgba(14,165,233,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ braking_range }}" data-dist="{{ benchmark_braking_m }}" data-plots="speed,pedals">{{ benchmark_braking_m }}m</button>,
+        whereas Lap {{ target_lap_num }} brakes at
+        <button class="telemetry-jump-btn pill-bad" style="background:rgba(244,63,94,0.16);color:#fda4af;border-color:rgba(244,63,94,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ braking_range }}" data-dist="{{ target_braking_m }}" data-plots="speed,pedals">{{ target_braking_m }}m</button>.
       </li>
       <li>
         <span class="evidence-tag evidence-high">Direct Evidence</span>
-        <strong>Apex Minimum Speed:</strong> Minimum apex speed at 
-        <button class="telemetry-jump-btn" data-dist="{{ apex_m }}" data-xlim="{{ apex_xlim }}" data-plots="speed,steering">
-          {{ apex_m }}m (Apex)
-        </button> 
+        <strong>Apex Minimum Speed:</strong> Minimum apex speed at
+        <button class="telemetry-jump-btn pill-apex" style="background:rgba(245,158,11,0.16);color:#fcd34d;border-color:rgba(245,158,11,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ apex_range }}" data-dist="{{ apex_m }}" data-plots="speed,steering">{{ apex_m }}m (Apex)</button>
         was {{ target_apex_speed }} km/h vs {{ benchmark_apex_speed }} km/h on Benchmark.
       </li>
       <li>
         <span class="evidence-tag {{ throttle_evidence_tag_class }}">{{ throttle_evidence_label }}</span>
-        <strong>Throttle Commitment:</strong> Full throttle pickup occurred at 
-        <button class="telemetry-jump-btn" data-dist="{{ target_throttle_m }}" data-xlim="{{ exit_xlim }}">
-          {{ target_throttle_m }}m
-        </button> 
-        compared to 
-        <button class="telemetry-jump-btn" data-dist="{{ benchmark_throttle_m }}" data-xlim="{{ exit_xlim }}">
-          {{ benchmark_throttle_m }}m
-        </button> on Benchmark.
+        <strong>Throttle Commitment:</strong> Full throttle pickup occurred at
+        <button class="telemetry-jump-btn pill-bad" style="background:rgba(244,63,94,0.16);color:#fda4af;border-color:rgba(244,63,94,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ exit_range }}" data-dist="{{ target_throttle_m }}" data-plots="speed,pedals">{{ target_throttle_m }}m</button>
+        compared to
+        <button class="telemetry-jump-btn pill-good" style="background:rgba(16,185,129,0.16);color:#6ee7b7;border-color:rgba(16,185,129,0.38);" data-laps="{{ benchmark_lap_id }},{{ target_lap_id }}" data-focus-range="{{ exit_range }}" data-dist="{{ benchmark_throttle_m }}" data-plots="speed,pedals">{{ benchmark_throttle_m }}m</button>
+        on Benchmark.
       </li>
     </ul>
   </div>
@@ -115,9 +153,6 @@ Note: initial_turn_idx is 0-indexed into get_track_info()['turns'] (0 = first tu
     <ol>
       <li><strong>{{ takeaway_1_title }}:</strong> {{ takeaway_1_body }}</li>
       <li><strong>{{ takeaway_2_title }}:</strong> {{ takeaway_2_body }}</li>
-      {% if takeaway_3_title %}
-      <li><strong>{{ takeaway_3_title }}:</strong> {{ takeaway_3_body }}</li>
-      {% endif %}
     </ol>
   </div>
 </div>

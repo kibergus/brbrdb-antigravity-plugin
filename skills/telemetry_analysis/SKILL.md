@@ -64,7 +64,14 @@ Your commentary and the **BrBrDb Telemetry** viewer work together as a unified w
   - **Corners / Turns**: Every turn mention (`Turn 3`) with `turn` (0-indexed, matching `get_track_info()['turns']`) and `focusRange`.
   - **Laps**: Every compared lap mention (`Lap 6 (Benchmark)`, `Lap 5`) with `lapsA` / `lapsB` so the user can switch or highlight laps directly.
   - **Channel events & overlays**: Notable trace features (e.g., speed drops, Delta T inflections, steering/pedal events, or any logged auxiliary sensor events) and map overlay toggles (`overlays: [...]`).
-- **Purpose-Driven Inline Triggers**: Embed pills naturally inline inside the sentence where the claim is made. **Do NOT** create generic, disconnected button bars hanging in the air (e.g., standalone "Show Steering" toolbars); every pill must serve the specific observation being explained.
+- **Purpose-Driven Inline Triggers**: Embed pills naturally inline inside the sentence where the claim is made. **Do NOT** create generic, disconnected button bars hanging in the air (e.g., standalone "Show Steering" toolbars or "Focus Entire Turn" buttons); every pill must serve the specific observation being explained.
+- **Consistent Semantic Pill Colors** (use identically across `<agent-embed>` chat pills and `save_report` HTML):
+  - **Violet (`pill-turn`)** — Corners / turns (`Turn 1 (Esses)`, `Turn 3`)
+  - **Emerald (`pill-good`)** — Benchmarks, lap-pair comparisons, and clean throttle pickup (`Lap 10 vs Lap 6`, `95.0m`)
+  - **Sky (`pill-brake`)** — Smooth braking initiation or speed-settle marks (`63.1m`, `92.5m`)
+  - **Amber (`pill-apex`)** — Apexes and curb clipping points (`105.0m (Apex 1)`, `338.0m (Apex)`)
+  - **Cyan (`pill-gaze`)** — Gaze shifts or auxiliary physiological/sensor events (`120.0m (Eyes & Hands Switch)`)
+  - **Rose (`pill-bad`)** — Time-loss triggers: premature gas, late/missed braking, throttle dumps, wheel scrub, slides, or spins (`90.0m`, `136.9m (-10.3 km/h)`)
 
 > [!IMPORTANT]
 > **NEVER output ` ```html ... ``` ` blocks directly in chat** (they render as literal code, not buttons). Always:
@@ -168,7 +175,9 @@ Every finding, diagnosis, and coaching takeaway **MUST be grounded in measured t
 ## 5. Report Publishing Policy (`save_report` / `edit_report`)
 
 - **Local by Default**: Deliver commentary, `<agent-embed>` pills, and `<workspace>/studies/` files locally—**never** call `save_report` or `edit_report` unless the user explicitly asks to publish/save to the website.
-- **Same Rules for Published Reports**: When publishing a report with `save_report` / `edit_report` (formatted via [report_template.html](references/report_template.html)), apply the **exact same rules** as `<agent-embed>` commentary:
-  - Make all distances, braking/throttle points, apexes, turns, and compared laps clickable inline `<button class="telemetry-jump-btn" data-...>` pills (purpose-driven, inline in the text—no disconnected button bars).
-  - Follow the same **Strictly Data-Driven** evidence/confidence rules and **Simple Language for ~11-Year-Olds** coaching tone.
+- **Adapt Structure to Scope**: Use [report_template.html](references/report_template.html) (`<h2>` title, light-blue `<h3>` section headers, `.report-stats-grid` cards, `.evidence-tag` badges) as a flexible guide tailored to the task—use the full breakdown for corner/session audits, keep focused coaching answers concise, and when asked to publish an existing chat response as a report, preserve its structure and wording cleanly unless asked to expand it.
+- **Same Interactive & Visual Rules as `<agent-embed>`**:
+  - Make **all** distances, braking/throttle points, apexes, turns, gaze/sensor switches, and compared laps clickable inline `<button class="telemetry-jump-btn pill-*" data-...>` pills inside the sentence (no disconnected button bars), using the **exact same 6 semantic pill colors** (`pill-turn`, `pill-good`, `pill-brake`, `pill-apex`, `pill-gaze`, `pill-bad`; include the scoped `<style>` block from [report_template.html](references/report_template.html) so colors render consistently).
+  - **Initial & Per-Pill Map Framing**: In the report JSON frontmatter `"state"`, `"turn"` is **`0`-indexed** (`0` = first turn in `get_track_info()['turns']`). Always set `"turn": <0-indexed>` **and** `"focusRange": [start_m, end_m]` + `"mapRange": [start_m, end_m]` + `"xlim": [start_m, end_m]` so opening the report link frames both the Google Map and bottom X-axis on the primary corner/complex. On `.telemetry-jump-btn` buttons, always pass `data-focus-range="start,end"` so every click frames both map bounds and plots cleanly.
+  - Follow the same **Strictly Data-Driven** evidence/confidence rules and **Simple Language for ~11-Year-Olds** coaching tone (`km/h` exclusively).
 - **Graceful `PermissionError` Handling**: If `save_report` fails with `PermissionError` (`manage_reports` permission required), do not treat it as a failure; inform the user that server publishing requires elevated permissions and confirm all local studies and viewer controls remain active.
